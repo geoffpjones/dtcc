@@ -1,5 +1,9 @@
 package com.markov.fx.pipeline;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.markov.fx.util.CsvUtils;
+
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -21,14 +25,16 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
+import java.util.logging.Logger;
 
 public class DtccPublicClient {
     private static final String BASE = "https://pddata.dtcc.com/ppd/api";
-    private static final Pattern FILE_NAME_RE = Pattern.compile("\"fileName\"\\s*:\\s*\"([^\"]+)\"");
     private static final Pattern FILE_DATE_RE = Pattern.compile("_(\\d{4})_(\\d{2})_(\\d{2})\\.zip$");
     private static final int HTTP_TIMEOUT_SECONDS = 90;
+    private static final Logger LOG = Logger.getLogger(DtccPublicClient.class.getName());
 
     private final HttpClient httpClient = HttpClient.newHttpClient();
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public int ingestRange(
             String regime,
@@ -59,12 +65,12 @@ public class DtccPublicClient {
             repository.insertTradeRows(parseResult.optionRows());
             repository.markFileIngested(fileName, d, parseResult.totalRows(), parseResult.optionRows().size());
             parsedFiles++;
-            System.out.printf(
-                    "DTCC ingested file=%s rows=%d option_rows=%d%n",
+            LOG.info(() -> String.format(
+                    "DTCC ingested file=%s rows=%d option_rows=%d",
                     fileName,
                     parseResult.totalRows(),
                     parseResult.optionRows().size()
-            );
+            ));
         }
 
         return parsedFiles;
@@ -81,9 +87,15 @@ public class DtccPublicClient {
             throw new IOException("DTCC list request failed status=" + res.statusCode() + " url=" + url);
         }
         List<String> out = new ArrayList<>();
-        Matcher m = FILE_NAME_RE.matcher(res.body());
-        while (m.find()) {
-            out.add(m.group(1));
+        JsonNode root = objectMapper.readTree(res.body());
+        if (root == null || !root.isArray()) {
+            throw new IOException("Unexpected DTCC list JSON format (expected array)");
+        }
+        for (JsonNode node : root) {
+            JsonNode fileName = node.get("fileName");
+            if (fileName != null && fileName.isTextual() && !fileName.asText().isBlank()) {
+                out.add(fileName.asText());
+            }
         }
         return out;
     }
@@ -117,12 +129,12 @@ public class DtccPublicClient {
                 if (headerLine == null) {
                     return new ParseResult(totalRows, optionRows);
                 }
-                List<String> headers = parseCsvLine(headerLine);
+                List<String> headers = CsvUtils.parseLine(headerLine);
 
                 String line;
                 while ((line = reader.readLine()) != null) {
                     totalRows++;
-                    List<String> fields = parseCsvLine(line);
+                    List<String> fields = CsvUtils.parseLine(line);
                     if (fields.isEmpty()) {
                         continue;
                     }
@@ -217,35 +229,13 @@ public class DtccPublicClient {
         }
     }
 
-    static List<String> parseCsvLine(String line) {
-        List<String> out = new ArrayList<>();
-        if (line == null) {
-            return out;
+    private static String rowHash(String sourceFile, int rowNum, List<String> fields) {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (Exception e) {
+            throw new RuntimeException("Missing SHA-256 MessageDigest provider", e);
         }
-        StringBuilder cur = new StringBuilder();
-        boolean inQuotes = false;
-        for (int i = 0; i < line.length(); i++) {
-            char ch = line.charAt(i);
-            if (ch == '"') {
-                if (inQuotes && i + 1 < line.length() && line.charAt(i + 1) == '"') {
-                    cur.append('"');
-                    i++;
-                } else {
-                    inQuotes = !inQuotes;
-                }
-            } else if (ch == ',' && !inQuotes) {
-                out.add(cur.toString());
-                cur.setLength(0);
-            } else {
-                cur.append(ch);
-            }
-        }
-        out.add(cur.toString());
-        return out;
-    }
-
-    private static String rowHash(String sourceFile, int rowNum, List<String> fields) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
         digest.update(sourceFile.getBytes(StandardCharsets.UTF_8));
         digest.update((byte) '|');
         digest.update(Integer.toString(rowNum).getBytes(StandardCharsets.UTF_8));

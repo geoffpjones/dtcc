@@ -28,7 +28,10 @@ public class HourlyBarCsvExporter {
                 """;
 
         try {
-            Files.createDirectories(outputCsv.getParent());
+            Path parent = outputCsv.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
         } catch (IOException e) {
             throw new RuntimeException("Failed to create output folder for " + outputCsv, e);
         }

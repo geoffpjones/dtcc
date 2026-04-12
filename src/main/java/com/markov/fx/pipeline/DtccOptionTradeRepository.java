@@ -1,5 +1,7 @@
 package com.markov.fx.pipeline;
 
+import com.markov.fx.util.CsvUtils;
+
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -10,13 +12,15 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
+import java.util.logging.Logger;
 
 public class DtccOptionTradeRepository {
+    private static final Logger LOG = Logger.getLogger(DtccOptionTradeRepository.class.getName());
     private final String dbUrl;
     private final Path dbPath;
 
@@ -93,6 +97,7 @@ public class DtccOptionTradeRepository {
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize DTCC SQLite schema", e);
         }
+        LOG.info(() -> "SQLite schema ready at " + dbPath);
     }
 
     public Optional<LocalDate> latestSourceDate() {
@@ -137,29 +142,34 @@ public class DtccOptionTradeRepository {
         try (Connection c = DriverManager.getConnection(dbUrl);
              PreparedStatement ps = c.prepareStatement(sql)) {
             c.setAutoCommit(false);
-            for (DtccPublicClient.OptionRow row : rows) {
-                ps.setString(1, row.pair());
-                ps.setString(2, row.sourceFile());
-                ps.setString(3, row.sourceDate().toString());
-                ps.setString(4, row.actionType());
-                ps.setString(5, row.upiFisn());
-                ps.setDouble(6, row.strikePrice());
-                ps.setString(7, row.expirationDate());
-                ps.setString(8, row.eventTimestamp());
-                ps.setString(9, row.notionalCcyLeg1());
-                ps.setDouble(10, row.notionalAmtLeg1());
-                ps.setString(11, row.notionalCcyLeg2());
-                ps.setDouble(12, row.notionalAmtLeg2());
-                ps.setString(13, row.embeddedOptionType());
-                ps.setString(14, row.optionType());
-                ps.setString(15, row.optionStyle());
-                ps.setString(16, row.productName());
-                ps.setString(17, row.rowHash());
-                ps.setString(18, now.toString());
-                ps.addBatch();
+            try {
+                for (DtccPublicClient.OptionRow row : rows) {
+                    ps.setString(1, row.pair());
+                    ps.setString(2, row.sourceFile());
+                    ps.setString(3, row.sourceDate().toString());
+                    ps.setString(4, row.actionType());
+                    ps.setString(5, row.upiFisn());
+                    ps.setDouble(6, row.strikePrice());
+                    ps.setString(7, row.expirationDate());
+                    ps.setString(8, row.eventTimestamp());
+                    ps.setString(9, row.notionalCcyLeg1());
+                    ps.setDouble(10, row.notionalAmtLeg1());
+                    ps.setString(11, row.notionalCcyLeg2());
+                    ps.setDouble(12, row.notionalAmtLeg2());
+                    ps.setString(13, row.embeddedOptionType());
+                    ps.setString(14, row.optionType());
+                    ps.setString(15, row.optionStyle());
+                    ps.setString(16, row.productName());
+                    ps.setString(17, row.rowHash());
+                    ps.setString(18, now.toString());
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+                c.commit();
+            } catch (SQLException e) {
+                c.rollback();
+                throw e;
             }
-            ps.executeBatch();
-            c.commit();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to insert dtcc option rows", e);
         }
@@ -188,7 +198,7 @@ public class DtccOptionTradeRepository {
         }
     }
 
-    public void exportOptionsCsv(Path outputCsv, Set<String> pairs) {
+    public void exportOptionsCsv(Path outputCsv, Iterable<String> pairs) {
         String sql = """
                 SELECT action_type, upi_fisn, strike_price, expiration_date, source_date, event_timestamp,
                        notional_ccy_leg1, notional_amt_leg1, notional_ccy_leg2, notional_amt_leg2,
@@ -198,7 +208,10 @@ public class DtccOptionTradeRepository {
                 ORDER BY source_date ASC, id ASC
                 """;
         try {
-            Files.createDirectories(outputCsv.getParent());
+            Path parent = outputCsv.getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
         } catch (IOException e) {
             throw new RuntimeException("Failed creating output directory for " + outputCsv, e);
         }
@@ -270,10 +283,10 @@ public class DtccOptionTradeRepository {
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, tradeDate.toString());
             ps.setString(2, pair);
-            ps.setDouble(3, toDouble(row.get("ref_price_prev_close")));
-            ps.setDouble(4, toDouble(row.get("buy_limit")));
-            ps.setDouble(5, toDouble(row.get("sell_limit")));
-            ps.setDouble(6, toDouble(row.get("eod_close")));
+            setNullableDouble(ps, 3, parseNullableDouble(row.get("ref_price_prev_close")));
+            setNullableDouble(ps, 4, parseNullableDouble(row.get("buy_limit")));
+            setNullableDouble(ps, 5, parseNullableDouble(row.get("sell_limit")));
+            setNullableDouble(ps, 6, parseNullableDouble(row.get("eod_close")));
             ps.setString(7, row.getOrDefault("notes", ""));
             ps.setString(8, Instant.now().toString());
             ps.executeUpdate();
@@ -283,11 +296,7 @@ public class DtccOptionTradeRepository {
     }
 
     private static String csv(String v) {
-        String text = v == null ? "" : v;
-        if (text.contains(",") || text.contains("\"") || text.contains("\n")) {
-            return "\"" + text.replace("\"", "\"\"") + "\"";
-        }
-        return text;
+        return CsvUtils.escape(v);
     }
 
     private static String doubleText(double v) {
@@ -297,14 +306,22 @@ public class DtccOptionTradeRepository {
         return Double.toString(v);
     }
 
-    private static double toDouble(String v) {
+    private static Double parseNullableDouble(String v) {
         if (v == null || v.isBlank()) {
-            return 0.0;
+            return null;
         }
         try {
             return Double.parseDouble(v);
         } catch (Exception e) {
-            return 0.0;
+            return null;
+        }
+    }
+
+    private static void setNullableDouble(PreparedStatement ps, int idx, Double value) throws SQLException {
+        if (value == null || value.isNaN() || value.isInfinite()) {
+            ps.setNull(idx, Types.REAL);
+        } else {
+            ps.setDouble(idx, value);
         }
     }
 }

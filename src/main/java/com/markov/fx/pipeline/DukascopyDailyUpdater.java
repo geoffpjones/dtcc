@@ -8,8 +8,10 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.logging.Logger;
 
 public class DukascopyDailyUpdater {
+    private static final Logger LOG = Logger.getLogger(DukascopyDailyUpdater.class.getName());
     private final DukascopyBi5Client client;
     private final SqliteBarRepository barRepository;
 
@@ -35,14 +37,14 @@ public class DukascopyDailyUpdater {
                 loadedBars += bars.size();
             } catch (Exception e) {
                 failedDays++;
-                System.err.printf("Dukascopy failed symbol=%s day=%s error=%s%n", symbol, d, e.getMessage());
+                LOG.warning("Dukascopy failed symbol=" + symbol + " day=" + d + " error=" + e.getMessage());
             }
             Thread.sleep(150L);
             if (idx % 30 == 0 || idx == totalDays) {
-                System.out.printf(
-                        "Dukascopy progress symbol=%s %d/%d days loadedBars=%d failedDays=%d%n",
+                LOG.info(String.format(
+                        "Dukascopy progress symbol=%s %d/%d days loadedBars=%d failedDays=%d",
                         symbol, idx, totalDays, loadedBars, failedDays
-                );
+                ));
             }
         }
         return loadedBars;
