@@ -75,16 +75,14 @@ public class DailyRocPipelineMain {
     }
 
     private static void recalcGamma(PipelineConfig cfg, Path optionsForGamma) throws Exception {
-        List<String> cmd = List.of(
-                cfg.pythonExec(),
-                "scripts/build_gamma_for_pairs.py",
-                "--pairs", "EURUSD,GBPUSD",
-                "--options-input", optionsForGamma.toString(),
-                "--tick-dir", cfg.tickDir().toString(),
-                "--out-dir", cfg.dataDir().toString(),
-                "--vol-assumption", Double.toString(cfg.volAssumption())
+        new GammaRecalculator().recalculate(
+                List.of("EURUSD", "GBPUSD"),
+                optionsForGamma,
+                cfg.tickDir(),
+                cfg.dataDir(),
+                cfg.volAssumption(),
+                false
         );
-        runCommand(cmd, cfg.projectRoot(), cfg.commandTimeoutSeconds());
     }
 
     private static Path produceLimitReports(PipelineConfig cfg, List<String> pairs, DtccOptionTradeRepository optionRepo) throws Exception {

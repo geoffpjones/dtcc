@@ -27,7 +27,8 @@ Daily stages:
 3. Hourly export:
    - aggregate minute bars to hourly OHLCV csv per pair.
 4. Gamma recomputation:
-   - call python `scripts/build_gamma_for_pairs.py`.
+   - run native Java gamma builder,
+   - write daily and strike-level call/put gamma csv outputs.
 5. Limit report:
    - call python `scripts/backtest_walkforward_gamma_limits.py` for report date,
    - persist report rows to SQLite and csv.
@@ -56,12 +57,12 @@ Bootstrap behavior:
 ## 4. Core Quant Assumptions
 
 ### 4.1 Notional proxy
-Gamma scripts use a simplified notional proxy:
+Gamma uses a simplified notional proxy:
 - option notional is approximated from DTCC leg notionals in pair currencies,
 - this is a practical heuristic, not a full premium-adjusted exposure model.
 
 ### 4.2 Volatility assumption
-Gamma uses a fixed sigma (`--vol-assumption`, default `0.10`) for BS gamma.
+Gamma uses a fixed sigma (`--vol-assumption`, default `0.10`) for Black-Scholes gamma.
 - no smile/surface calibration,
 - this is a relative signal-weighting model, not a pricing model.
 
@@ -69,13 +70,24 @@ Gamma uses a fixed sigma (`--vol-assumption`, default `0.10`) for BS gamma.
 Gamma inventory is aligned so day `T` reflects positions known before trading day `T`.
 - roll-offs are applied end-of-day,
 - new adds are applied for next day state.
+- daily output still reports same-day `added_*` and `expiring_*` flows, but `active_*` and gamma are
+  based on the start-of-day book only.
 
-### 4.4 Limit derivation
+### 4.4 Gamma outputs
+The Java gamma builder writes two files per pair:
+- `*_gamma_proxy_daily_call_put.csv`
+  - daily total active notionals and aggregate call/put gamma
+- `*_gamma_proxy_by_strike_call_put.csv`
+  - strike-level active notionals and call/put gamma
+
+These outputs are intentionally schema-compatible with the existing downstream Python limit-report step.
+
+### 4.5 Limit derivation
 Daily buy/sell levels are weighted averages of top gamma strikes:
 - buy side from call-gamma strikes below previous close,
 - sell side from put-gamma strikes above previous close.
 
-### 4.5 Execution simulation
+### 4.6 Execution simulation
 Backtests use hourly bars with intrabar assumptions:
 - fills are assumed when limit lies within `[low, high]`,
 - if stop and target are both touched in same bar, policy decides precedence,
@@ -83,7 +95,8 @@ Backtests use hourly bars with intrabar assumptions:
 
 ## 5. Operational Assumptions
 - Pipeline runs once daily after DTCC/market data for prior day is available.
-- Python scripts are available in environment and callable by configured interpreter.
+- Python is still required for limit-report and backtest scripts.
+- Gamma recomputation no longer depends on Python.
 - Network access is required for DTCC and Dukascopy pulls.
 
 ## 6. Failure Modes and Handling
@@ -93,6 +106,7 @@ Backtests use hourly bars with intrabar assumptions:
 
 ## 7. Known Limitations
 - DTCC product classification relies on field heuristics and UPI text matching.
+- Gamma sizing still relies on heuristic notional proxy rather than contract-normalized Greeks.
 - Strategy performance metrics depend on hourly bar assumptions.
 - Current pair scope in Java orchestrator is fixed to `EURUSD,GBPUSD`.
 
@@ -106,6 +120,7 @@ Backtests use hourly bars with intrabar assumptions:
    - missing-day detection,
    - monotonic timestamp checks,
    - duplicate row diagnostics.
+5. Re-implement daily limit generation in Java to remove the remaining Python runtime dependency.
 
 ### Mid-term improvements
 1. Replace heuristic notional proxy with pair-consistent base-currency normalization.
