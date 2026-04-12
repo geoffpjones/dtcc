@@ -101,7 +101,7 @@ public class DtccOptionTradeRepository {
     }
 
     public Optional<LocalDate> latestSourceDate() {
-        String sql = "SELECT MAX(source_date) AS max_source_date FROM dtcc_option_trades";
+        String sql = "SELECT MAX(source_date) AS max_source_date FROM dtcc_ingested_files";
         try (Connection c = DriverManager.getConnection(dbUrl);
              Statement st = c.createStatement();
              ResultSet rs = st.executeQuery(sql)) {

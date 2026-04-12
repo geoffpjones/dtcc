@@ -191,7 +191,8 @@ def main() -> int:
         monthly[ym] += r['net_pnl_pips']
 
     out_path = Path(args.output)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if out_path.parent != Path(''):
+        out_path.parent.mkdir(parents=True, exist_ok=True)
     fields = [
         'date', 'year_month', 'ref_price_prev_close',
         'buy_limit', 'sell_limit', 'eod_close',
@@ -204,7 +205,7 @@ def main() -> int:
         for r in rows:
             w.writerow({k: fmt(r[k]) for k in fields})
 
-    month_path = out_path.with_name('eurusd_walkforward_gamma_limits_monthly_summary.csv')
+    month_path = out_path.with_name(f'{out_path.stem}_monthly_summary.csv')
     with month_path.open('w', newline='', encoding='utf-8') as fh:
         w = csv.writer(fh)
         w.writerow(['year_month', 'net_pnl_pips'])

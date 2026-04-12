@@ -62,6 +62,7 @@ def main():
     OUT_SUM = args.out_summary
     pip_size = args.pip_size
     hourly = args.hourly
+    out_base = str(Path(OUT_SUM).resolve().parent)
     tps = [15, 20, 25, 30, 35, 40]
     sls = [15, 20, 25, 30, 35, 40]
     trails = [5, 10, 15, 20]
@@ -103,10 +104,10 @@ def main():
 
     # Apply best fixed on test
     fx_tp, fx_sl = int(best_fixed['tp_pips']), int(best_fixed['sl_pips'])
-    fx_train_tr = f'/home/geoffpjones/projects/dtcc/data/{pair}_sl_tp_fixed_train_best_trades.csv'
-    fx_train_dy = f'/home/geoffpjones/projects/dtcc/data/{pair}_sl_tp_fixed_train_best_daily.csv'
-    fx_test_tr = f'/home/geoffpjones/projects/dtcc/data/{pair}_sl_tp_fixed_test_best_trades.csv'
-    fx_test_dy = f'/home/geoffpjones/projects/dtcc/data/{pair}_sl_tp_fixed_test_best_daily.csv'
+    fx_train_tr = f'{out_base}/{pair}_sl_tp_fixed_train_best_trades.csv'
+    fx_train_dy = f'{out_base}/{pair}_sl_tp_fixed_train_best_daily.csv'
+    fx_test_tr = f'{out_base}/{pair}_sl_tp_fixed_test_best_trades.csv'
+    fx_test_dy = f'{out_base}/{pair}_sl_tp_fixed_test_best_daily.csv'
     run_one(TRAIN_SIGNALS, hourly, 'fixed', fx_tp, fx_sl, 10, pip_size, fx_train_tr, fx_train_dy)
     run_one(TEST_SIGNALS, hourly, 'fixed', fx_tp, fx_sl, 10, pip_size, fx_test_tr, fx_test_dy)
     fx_train = summarize(fx_train_tr)
@@ -114,10 +115,10 @@ def main():
 
     # Apply best trailing on test
     tr_tp, tr_sl, tr_tr = int(best_trail['tp_pips']), int(best_trail['sl_pips']), int(best_trail['trail_pips'])
-    tr_train_tr = f'/home/geoffpjones/projects/dtcc/data/{pair}_sl_tp_trailing_train_best_trades.csv'
-    tr_train_dy = f'/home/geoffpjones/projects/dtcc/data/{pair}_sl_tp_trailing_train_best_daily.csv'
-    tr_test_tr = f'/home/geoffpjones/projects/dtcc/data/{pair}_sl_tp_trailing_test_best_trades.csv'
-    tr_test_dy = f'/home/geoffpjones/projects/dtcc/data/{pair}_sl_tp_trailing_test_best_daily.csv'
+    tr_train_tr = f'{out_base}/{pair}_sl_tp_trailing_train_best_trades.csv'
+    tr_train_dy = f'{out_base}/{pair}_sl_tp_trailing_train_best_daily.csv'
+    tr_test_tr = f'{out_base}/{pair}_sl_tp_trailing_test_best_trades.csv'
+    tr_test_dy = f'{out_base}/{pair}_sl_tp_trailing_test_best_daily.csv'
     run_one(TRAIN_SIGNALS, hourly, 'trail_after_tp', tr_tp, tr_sl, tr_tr, pip_size, tr_train_tr, tr_train_dy)
     run_one(TEST_SIGNALS, hourly, 'trail_after_tp', tr_tp, tr_sl, tr_tr, pip_size, tr_test_tr, tr_test_dy)
     tr_train = summarize(tr_train_tr)

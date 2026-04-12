@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 
 public class DailyRocPipelineMain {
@@ -150,17 +151,29 @@ public class DailyRocPipelineMain {
         pb.redirectErrorStream(true);
         Process p = pb.start();
 
-        try (BufferedReader r = p.inputReader()) {
-            String line;
-            while ((line = r.readLine()) != null) {
-                System.out.println(line);
+        AtomicReference<Throwable> readerError = new AtomicReference<>(null);
+        Thread readerThread = new Thread(() -> {
+            try (BufferedReader r = p.inputReader()) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    System.out.println(line);
+                }
+            } catch (Throwable t) {
+                readerError.set(t);
             }
-        }
+        }, "cmd-output-" + Integer.toHexString(cmd.hashCode()));
+        readerThread.setDaemon(true);
+        readerThread.start();
 
         boolean done = p.waitFor(timeoutSec, TimeUnit.SECONDS);
         if (!done) {
             p.destroyForcibly();
+            readerThread.join(5_000L);
             throw new RuntimeException("Command timed out after " + timeoutSec + "s: " + String.join(" ", cmd));
+        }
+        readerThread.join(5_000L);
+        if (readerError.get() != null) {
+            throw new RuntimeException("Failed reading command output for: " + String.join(" ", cmd), readerError.get());
         }
         int rc = p.exitValue();
         if (rc != 0) {

@@ -5,6 +5,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 public record PipelineConfig(
         Path projectRoot,
@@ -67,19 +68,27 @@ public record PipelineConfig(
     }
 
     private static Map<String, String> parseFlags(String[] args) {
+        Set<String> allowed = Set.of(
+                "project-root", "data-dir", "tick-dir", "db", "python",
+                "report-date", "dtcc-bootstrap-start", "market-bootstrap-start",
+                "dtcc-regime", "dtcc-asset", "vol-assumption", "topn",
+                "command-timeout-sec"
+        );
         Map<String, String> out = new HashMap<>();
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
             if (!a.startsWith("--")) {
-                continue;
+                throw new IllegalArgumentException("Unexpected positional argument: " + a);
             }
             String key = a.substring(2);
-            if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
-                out.put(key, args[i + 1]);
-                i++;
-            } else {
-                out.put(key, "true");
+            if (!allowed.contains(key)) {
+                throw new IllegalArgumentException("Unknown argument: --" + key);
             }
+            if (i + 1 >= args.length || args[i + 1].startsWith("--")) {
+                throw new IllegalArgumentException("Missing value for --" + key);
+            }
+            out.put(key, args[i + 1]);
+            i++;
         }
         return out;
     }

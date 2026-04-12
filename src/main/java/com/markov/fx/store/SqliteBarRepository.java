@@ -68,18 +68,23 @@ public class SqliteBarRepository implements BarRepository {
         try (Connection c = DriverManager.getConnection(dbUrl);
              PreparedStatement ps = c.prepareStatement(sql)) {
             c.setAutoCommit(false);
-            for (Bar b : bars) {
-                ps.setString(1, symbol);
-                ps.setString(2, b.timestamp().toString());
-                ps.setDouble(3, b.open());
-                ps.setDouble(4, b.high());
-                ps.setDouble(5, b.low());
-                ps.setDouble(6, b.close());
-                ps.setDouble(7, b.volume());
-                ps.addBatch();
+            try {
+                for (Bar b : bars) {
+                    ps.setString(1, symbol);
+                    ps.setString(2, b.timestamp().toString());
+                    ps.setDouble(3, b.open());
+                    ps.setDouble(4, b.high());
+                    ps.setDouble(5, b.low());
+                    ps.setDouble(6, b.close());
+                    ps.setDouble(7, b.volume());
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+                c.commit();
+            } catch (SQLException e) {
+                c.rollback();
+                throw e;
             }
-            ps.executeBatch();
-            c.commit();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to save bars", e);
         }

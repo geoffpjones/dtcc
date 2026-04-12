@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -64,7 +64,7 @@ def load_bars(path: Path) -> list[Bar]:
         for row in r:
             bars.append(
                 Bar(
-                    ts=datetime.fromisoformat(row['timestamp_utc']),
+                    ts=_parse_ts_utc(row['timestamp_utc']),
                     high=float(row['high']),
                     low=float(row['low']),
                     close=float(row['close']),
@@ -85,7 +85,7 @@ def load_entries(path: Path) -> list[Trade]:
                     Trade(
                         signal_date=signal_date,
                         side='long',
-                        entry_ts=datetime.fromisoformat(row['buy_fill_time_utc']),
+                        entry_ts=_parse_ts_utc(row['buy_fill_time_utc']),
                         entry_price=float(row['buy_limit']),
                     )
                 )
@@ -94,7 +94,7 @@ def load_entries(path: Path) -> list[Trade]:
                     Trade(
                         signal_date=signal_date,
                         side='short',
-                        entry_ts=datetime.fromisoformat(row['sell_fill_time_utc']),
+                        entry_ts=_parse_ts_utc(row['sell_fill_time_utc']),
                         entry_price=float(row['sell_limit']),
                     )
                 )
@@ -110,7 +110,14 @@ def find_entry_bar_index(bars: list[Bar], ts: datetime) -> int:
     for i, b in enumerate(bars):
         if b.ts > ts:
             return i
-    return len(bars) - 1
+    return -1
+
+
+def _parse_ts_utc(v: str) -> datetime:
+    ts = datetime.fromisoformat(v)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc)
 
 
 def pnl_pips(side: str, entry: float, exitp: float, pip_size: float) -> float:
@@ -131,7 +138,42 @@ def run_trade(
     max_hold_mode: str,
     intrabar_policy: str,
 ) -> dict:
+    if not bars:
+        return {
+            'signal_date': trade.signal_date,
+            'side': trade.side,
+            'entry_ts_utc': trade.entry_ts.isoformat(),
+            'entry_price': trade.entry_price,
+            'tp_level': trade.entry_price,
+            'sl_level': trade.entry_price,
+            'tp_mode': tp_mode,
+            'trail_pips': trail_pips,
+            'trailing_activated': 0,
+            'exit_ts_utc': trade.entry_ts.isoformat(),
+            'exit_price': trade.entry_price,
+            'exit_reason': 'no_hourly_data',
+            'hold_hours': 0.0,
+            'pnl_pips': 0.0,
+        }
+
     idx = find_entry_bar_index(bars, trade.entry_ts)
+    if idx < 0:
+        return {
+            'signal_date': trade.signal_date,
+            'side': trade.side,
+            'entry_ts_utc': trade.entry_ts.isoformat(),
+            'entry_price': trade.entry_price,
+            'tp_level': trade.entry_price,
+            'sl_level': trade.entry_price,
+            'tp_mode': tp_mode,
+            'trail_pips': trail_pips,
+            'trailing_activated': 0,
+            'exit_ts_utc': trade.entry_ts.isoformat(),
+            'exit_price': trade.entry_price,
+            'exit_reason': 'entry_not_in_hourly_data',
+            'hold_hours': 0.0,
+            'pnl_pips': 0.0,
+        }
 
     # We start evaluating exits from the NEXT bar to avoid intrabar ordering ambiguity on entry bar.
     start_idx = min(idx + 1, len(bars) - 1)
@@ -153,7 +195,7 @@ def run_trade(
         cutoff_ny = entry_ny.replace(hour=17, minute=0, second=0, microsecond=0)
         if entry_ny >= cutoff_ny:
             cutoff_ny = cutoff_ny + timedelta(days=1)
-        deadline = cutoff_ny.astimezone(ZoneInfo('UTC'))
+        deadline = cutoff_ny.astimezone(timezone.utc)
     else:
         deadline = trade.entry_ts + timedelta(hours=max_hold_hours)
 

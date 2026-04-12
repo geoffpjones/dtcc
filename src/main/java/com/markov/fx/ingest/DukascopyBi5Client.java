@@ -14,11 +14,13 @@ import java.net.http.HttpResponse;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
 public class DukascopyBi5Client {
     private static final String ROOT = "https://datafeed.dukascopy.com/datafeed";
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(60);
 
     private final HttpClient httpClient;
 
@@ -28,7 +30,10 @@ public class DukascopyBi5Client {
 
     public List<Bar> fetchDay(String symbol, LocalDate dayUtc) throws IOException, InterruptedException {
         URI uri = URI.create(buildDailyBi5Url(symbol, dayUtc));
-        HttpRequest req = HttpRequest.newBuilder(uri).GET().build();
+        HttpRequest req = HttpRequest.newBuilder(uri)
+                .timeout(REQUEST_TIMEOUT)
+                .GET()
+                .build();
         HttpResponse<byte[]> res = httpClient.send(req, HttpResponse.BodyHandlers.ofByteArray());
 
         if (res.statusCode() == 404) {

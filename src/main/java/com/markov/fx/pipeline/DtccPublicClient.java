@@ -2,7 +2,9 @@ package com.markov.fx.pipeline;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.markov.fx.util.CsvUtils;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVRecord;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
@@ -119,57 +121,60 @@ public class DtccPublicClient {
         List<OptionRow> optionRows = new ArrayList<>();
 
         try (ZipInputStream zin = new ZipInputStream(new ByteArrayInputStream(zipBytes), StandardCharsets.UTF_8)) {
-            ZipEntry entry = zin.getNextEntry();
-            if (entry == null) {
-                return new ParseResult(totalRows, optionRows);
-            }
-
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(zin, StandardCharsets.UTF_8))) {
-                String headerLine = reader.readLine();
-                if (headerLine == null) {
-                    return new ParseResult(totalRows, optionRows);
+            ZipEntry entry;
+            while ((entry = zin.getNextEntry()) != null) {
+                if (entry.isDirectory() || !entry.getName().toLowerCase().endsWith(".csv")) {
+                    continue;
                 }
-                List<String> headers = CsvUtils.parseLine(headerLine);
 
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    totalRows++;
-                    List<String> fields = CsvUtils.parseLine(line);
-                    if (fields.isEmpty()) {
-                        continue;
-                    }
-                    Map<String, String> row = toMap(headers, fields);
-                    if (!isOptionRow(row)) {
-                        continue;
-                    }
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(zin, StandardCharsets.UTF_8));
+                     CSVParser parser = CSVFormat.DEFAULT.builder()
+                             .setHeader()
+                             .setSkipHeaderRecord(true)
+                             .setIgnoreSurroundingSpaces(false)
+                             .build()
+                             .parse(reader)) {
+                    for (CSVRecord rec : parser) {
+                        totalRows++;
+                        Map<String, String> row = rec.toMap();
+                        if (!isOptionRow(row)) {
+                            continue;
+                        }
 
-                    String upi = row.getOrDefault("UPI FISN", "");
-                    String pair = pairFromUpi(upi, pairs);
-                    if (pair == null) {
-                        continue;
-                    }
+                        String upi = row.getOrDefault("UPI FISN", "");
+                        String pair = pairFromUpi(upi, pairs);
+                        if (pair == null) {
+                            continue;
+                        }
 
-                    OptionRow parsed = new OptionRow(
-                            pair,
-                            sourceFile,
-                            sourceDate,
-                            row.getOrDefault("Action type", ""),
-                            upi,
-                            toDouble(row.get("Strike Price")),
-                            row.getOrDefault("Expiration Date", ""),
-                            row.getOrDefault("Event timestamp", ""),
-                            row.getOrDefault("Notional currency-Leg 1", ""),
-                            toDouble(row.get("Notional amount-Leg 1")),
-                            row.getOrDefault("Notional currency-Leg 2", ""),
-                            toDouble(row.get("Notional amount-Leg 2")),
-                            row.getOrDefault("Embedded Option type", ""),
-                            row.getOrDefault("Option Type", ""),
-                            row.getOrDefault("Option Style", ""),
-                            row.getOrDefault("Product name", ""),
-                            rowHash(sourceFile, totalRows, fields)
-                    );
-                    optionRows.add(parsed);
+                        List<String> fields = new ArrayList<>(rec.size());
+                        for (int i = 0; i < rec.size(); i++) {
+                            fields.add(rec.get(i));
+                        }
+
+                        OptionRow parsed = new OptionRow(
+                                pair,
+                                sourceFile,
+                                sourceDate,
+                                row.getOrDefault("Action type", ""),
+                                upi,
+                                toDouble(row.get("Strike Price")),
+                                row.getOrDefault("Expiration Date", ""),
+                                row.getOrDefault("Event timestamp", ""),
+                                row.getOrDefault("Notional currency-Leg 1", ""),
+                                toDouble(row.get("Notional amount-Leg 1")),
+                                row.getOrDefault("Notional currency-Leg 2", ""),
+                                toDouble(row.get("Notional amount-Leg 2")),
+                                row.getOrDefault("Embedded Option type", ""),
+                                row.getOrDefault("Option Type", ""),
+                                row.getOrDefault("Option Style", ""),
+                                row.getOrDefault("Product name", ""),
+                                rowHash(sourceFile, totalRows, fields)
+                        );
+                        optionRows.add(parsed);
+                    }
                 }
+                break; // process first csv entry only
             }
         }
         return new ParseResult(totalRows, optionRows);
@@ -185,7 +190,7 @@ public class DtccPublicClient {
     }
 
     private static String pairFromUpi(String upiFisn, Set<String> pairs) {
-        String upi = upiFisn == null ? "" : upiFisn;
+        String upi = upiFisn == null ? "" : upiFisn.toUpperCase();
         for (String pair : pairs) {
             String a = pair.substring(0, 3);
             String b = pair.substring(3);
@@ -205,16 +210,6 @@ public class DtccPublicClient {
         int mm = Integer.parseInt(m.group(2));
         int dd = Integer.parseInt(m.group(3));
         return LocalDate.of(y, mm, dd);
-    }
-
-    private static Map<String, String> toMap(List<String> headers, List<String> fields) {
-        Map<String, String> map = new LinkedHashMap<>();
-        for (int i = 0; i < headers.size(); i++) {
-            String key = headers.get(i);
-            String value = i < fields.size() ? fields.get(i) : "";
-            map.put(key, value);
-        }
-        return map;
     }
 
     private static double toDouble(String v) {
