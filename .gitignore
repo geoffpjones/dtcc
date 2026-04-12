@@ -1,0 +1,20 @@
+# Build/tooling
+.gradle/
+build/
+target/
+out/
+.idea/
+.vscode/
+
+# Python caches
+__pycache__/
+*.pyc
+
+# Runtime/data artifacts
+data/
+raw/
+tick_data/
+
+# Local env / logs
+.env
+*.log

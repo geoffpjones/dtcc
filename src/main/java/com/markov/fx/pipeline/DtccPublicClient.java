@@ -1,0 +1,284 @@
+package com.markov.fx.pipeline;
+
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+
+public class DtccPublicClient {
+    private static final String BASE = "https://pddata.dtcc.com/ppd/api";
+    private static final Pattern FILE_NAME_RE = Pattern.compile("\"fileName\"\\s*:\\s*\"([^\"]+)\"");
+    private static final Pattern FILE_DATE_RE = Pattern.compile("_(\\d{4})_(\\d{2})_(\\d{2})\\.zip$");
+    private static final int HTTP_TIMEOUT_SECONDS = 90;
+
+    private final HttpClient httpClient = HttpClient.newHttpClient();
+
+    public int ingestRange(
+            String regime,
+            String asset,
+            LocalDate startInclusive,
+            LocalDate endInclusive,
+            Set<String> pairs,
+            DtccOptionTradeRepository repository
+    ) throws Exception {
+        if (startInclusive.isAfter(endInclusive)) {
+            return 0;
+        }
+
+        List<String> files = listFiles(regime, asset);
+        int parsedFiles = 0;
+
+        for (String fileName : files) {
+            LocalDate d = fileDate(fileName);
+            if (d == null || d.isBefore(startInclusive) || d.isAfter(endInclusive)) {
+                continue;
+            }
+            if (repository.isFileIngested(fileName)) {
+                continue;
+            }
+
+            byte[] zipBytes = downloadZip(fileName);
+            ParseResult parseResult = parseZip(fileName, d, zipBytes, pairs);
+            repository.insertTradeRows(parseResult.optionRows());
+            repository.markFileIngested(fileName, d, parseResult.totalRows(), parseResult.optionRows().size());
+            parsedFiles++;
+            System.out.printf(
+                    "DTCC ingested file=%s rows=%d option_rows=%d%n",
+                    fileName,
+                    parseResult.totalRows(),
+                    parseResult.optionRows().size()
+            );
+        }
+
+        return parsedFiles;
+    }
+
+    private List<String> listFiles(String regime, String asset) throws IOException, InterruptedException {
+        String url = BASE + "/cumulative/" + regime + "/" + asset;
+        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                .timeout(java.time.Duration.ofSeconds(HTTP_TIMEOUT_SECONDS))
+                .GET()
+                .build();
+        HttpResponse<String> res = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+        if (res.statusCode() >= 400) {
+            throw new IOException("DTCC list request failed status=" + res.statusCode() + " url=" + url);
+        }
+        List<String> out = new ArrayList<>();
+        Matcher m = FILE_NAME_RE.matcher(res.body());
+        while (m.find()) {
+            out.add(m.group(1));
+        }
+        return out;
+    }
+
+    private byte[] downloadZip(String fileName) throws IOException, InterruptedException {
+        String prefix = fileName.split("_", 2)[0].toLowerCase();
+        String url = BASE + "/report/cumulative/" + prefix + "/" + fileName;
+        HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+                .timeout(java.time.Duration.ofSeconds(HTTP_TIMEOUT_SECONDS))
+                .GET()
+                .build();
+        HttpResponse<byte[]> res = httpClient.send(req, HttpResponse.BodyHandlers.ofByteArray());
+        if (res.statusCode() >= 400) {
+            throw new IOException("DTCC download failed status=" + res.statusCode() + " url=" + url);
+        }
+        return res.body();
+    }
+
+    private ParseResult parseZip(String sourceFile, LocalDate sourceDate, byte[] zipBytes, Set<String> pairs) throws Exception {
+        int totalRows = 0;
+        List<OptionRow> optionRows = new ArrayList<>();
+
+        try (ZipInputStream zin = new ZipInputStream(new ByteArrayInputStream(zipBytes), StandardCharsets.UTF_8)) {
+            ZipEntry entry = zin.getNextEntry();
+            if (entry == null) {
+                return new ParseResult(totalRows, optionRows);
+            }
+
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(zin, StandardCharsets.UTF_8))) {
+                String headerLine = reader.readLine();
+                if (headerLine == null) {
+                    return new ParseResult(totalRows, optionRows);
+                }
+                List<String> headers = parseCsvLine(headerLine);
+
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    totalRows++;
+                    List<String> fields = parseCsvLine(line);
+                    if (fields.isEmpty()) {
+                        continue;
+                    }
+                    Map<String, String> row = toMap(headers, fields);
+                    if (!isOptionRow(row)) {
+                        continue;
+                    }
+
+                    String upi = row.getOrDefault("UPI FISN", "");
+                    String pair = pairFromUpi(upi, pairs);
+                    if (pair == null) {
+                        continue;
+                    }
+
+                    OptionRow parsed = new OptionRow(
+                            pair,
+                            sourceFile,
+                            sourceDate,
+                            row.getOrDefault("Action type", ""),
+                            upi,
+                            toDouble(row.get("Strike Price")),
+                            row.getOrDefault("Expiration Date", ""),
+                            row.getOrDefault("Event timestamp", ""),
+                            row.getOrDefault("Notional currency-Leg 1", ""),
+                            toDouble(row.get("Notional amount-Leg 1")),
+                            row.getOrDefault("Notional currency-Leg 2", ""),
+                            toDouble(row.get("Notional amount-Leg 2")),
+                            row.getOrDefault("Embedded Option type", ""),
+                            row.getOrDefault("Option Type", ""),
+                            row.getOrDefault("Option Style", ""),
+                            row.getOrDefault("Product name", ""),
+                            rowHash(sourceFile, totalRows, fields)
+                    );
+                    optionRows.add(parsed);
+                }
+            }
+        }
+        return new ParseResult(totalRows, optionRows);
+    }
+
+    private static boolean isOptionRow(Map<String, String> row) {
+        String embedded = row.getOrDefault("Embedded Option type", "").trim();
+        String otype = row.getOrDefault("Option Type", "").trim();
+        String ostyle = row.getOrDefault("Option Style", "").trim();
+        String pname = row.getOrDefault("Product name", "").toUpperCase();
+        String upiFisn = row.getOrDefault("UPI FISN", "").toUpperCase();
+        return !embedded.isEmpty() || !otype.isEmpty() || !ostyle.isEmpty() || pname.contains("OPTION") || upiFisn.contains("OPTION");
+    }
+
+    private static String pairFromUpi(String upiFisn, Set<String> pairs) {
+        String upi = upiFisn == null ? "" : upiFisn;
+        for (String pair : pairs) {
+            String a = pair.substring(0, 3);
+            String b = pair.substring(3);
+            if (upi.contains(a + " " + b) || upi.contains(b + " " + a)) {
+                return pair;
+            }
+        }
+        return null;
+    }
+
+    private static LocalDate fileDate(String filename) {
+        Matcher m = FILE_DATE_RE.matcher(filename);
+        if (!m.find()) {
+            return null;
+        }
+        int y = Integer.parseInt(m.group(1));
+        int mm = Integer.parseInt(m.group(2));
+        int dd = Integer.parseInt(m.group(3));
+        return LocalDate.of(y, mm, dd);
+    }
+
+    private static Map<String, String> toMap(List<String> headers, List<String> fields) {
+        Map<String, String> map = new LinkedHashMap<>();
+        for (int i = 0; i < headers.size(); i++) {
+            String key = headers.get(i);
+            String value = i < fields.size() ? fields.get(i) : "";
+            map.put(key, value);
+        }
+        return map;
+    }
+
+    private static double toDouble(String v) {
+        if (v == null || v.isBlank()) {
+            return 0.0;
+        }
+        String clean = v.replace(",", "").trim();
+        try {
+            return Double.parseDouble(clean);
+        } catch (Exception e) {
+            return 0.0;
+        }
+    }
+
+    static List<String> parseCsvLine(String line) {
+        List<String> out = new ArrayList<>();
+        if (line == null) {
+            return out;
+        }
+        StringBuilder cur = new StringBuilder();
+        boolean inQuotes = false;
+        for (int i = 0; i < line.length(); i++) {
+            char ch = line.charAt(i);
+            if (ch == '"') {
+                if (inQuotes && i + 1 < line.length() && line.charAt(i + 1) == '"') {
+                    cur.append('"');
+                    i++;
+                } else {
+                    inQuotes = !inQuotes;
+                }
+            } else if (ch == ',' && !inQuotes) {
+                out.add(cur.toString());
+                cur.setLength(0);
+            } else {
+                cur.append(ch);
+            }
+        }
+        out.add(cur.toString());
+        return out;
+    }
+
+    private static String rowHash(String sourceFile, int rowNum, List<String> fields) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        digest.update(sourceFile.getBytes(StandardCharsets.UTF_8));
+        digest.update((byte) '|');
+        digest.update(Integer.toString(rowNum).getBytes(StandardCharsets.UTF_8));
+        for (String f : fields) {
+            digest.update((byte) '|');
+            if (f != null) {
+                digest.update(f.getBytes(StandardCharsets.UTF_8));
+            }
+        }
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private record ParseResult(int totalRows, List<OptionRow> optionRows) {
+    }
+
+    public record OptionRow(
+            String pair,
+            String sourceFile,
+            LocalDate sourceDate,
+            String actionType,
+            String upiFisn,
+            double strikePrice,
+            String expirationDate,
+            String eventTimestamp,
+            String notionalCcyLeg1,
+            double notionalAmtLeg1,
+            String notionalCcyLeg2,
+            double notionalAmtLeg2,
+            String embeddedOptionType,
+            String optionType,
+            String optionStyle,
+            String productName,
+            String rowHash
+    ) {
+    }
+}
