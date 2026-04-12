@@ -56,6 +56,7 @@ public class HourlyBarCsvExporter {
 
                 while (rs.next()) {
                     Instant ts = Instant.parse(rs.getString("ts_utc"));
+                    // Aggregation assumption: UTC clock-hour buckets.
                     Instant bucket = ts.truncatedTo(ChronoUnit.HOURS);
                     double bo = rs.getDouble("open");
                     double bh = rs.getDouble("high");
@@ -68,6 +69,7 @@ public class HourlyBarCsvExporter {
                             writeHour(w, hourTs, o, h, l, cLast, v);
                             rows++;
                         }
+                        // Start new hour using first minute as open.
                         hourTs = bucket;
                         o = bo;
                         h = bh;
@@ -76,6 +78,7 @@ public class HourlyBarCsvExporter {
                         v = bv;
                         haveHour = true;
                     } else {
+                        // Intra-hour update: high=max, low=min, close=last, volume=sum.
                         h = Math.max(h, bh);
                         l = Math.min(l, bl);
                         cLast = bc;

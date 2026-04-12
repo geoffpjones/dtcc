@@ -142,6 +142,8 @@ public class DtccPublicClient {
                         }
 
                         String upi = row.getOrDefault("UPI FISN", "");
+                        // Pair filter assumption:
+                        // classify only target pairs by UPI currency-token text (A B or B A).
                         String pair = pairFromUpi(upi, pairs);
                         if (pair == null) {
                             continue;
@@ -174,7 +176,8 @@ public class DtccPublicClient {
                         optionRows.add(parsed);
                     }
                 }
-                break; // process first csv entry only
+                // DTCC cumulative zips are expected to contain one report csv.
+                break;
             }
         }
         return new ParseResult(totalRows, optionRows);

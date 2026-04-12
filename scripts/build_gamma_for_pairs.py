@@ -50,7 +50,9 @@ def option_side(upi: str) -> str | None:
 
 
 def eur_like_notional(row: dict[str, str], ccy_a: str, ccy_b: str) -> float:
-    # Use sum of notionals in either leg that match base/quote currencies.
+    # Exposure proxy assumption:
+    # We approximate option size as the sum of leg notionals denominated in either pair currency.
+    # This is a practical signal proxy, not a full valuation-normalized Greeks engine.
     total = 0.0
     c1 = (row.get('Notional currency-Leg 1') or '').strip().upper()
     c2 = (row.get('Notional currency-Leg 2') or '').strip().upper()
@@ -71,6 +73,7 @@ def bs_gamma(s: float, k: float, t_years: float, sigma: float) -> float:
     vol_sqrt_t = sigma * math.sqrt(t_years)
     if vol_sqrt_t <= 0:
         return 0.0
+    # Standard Black-Scholes gamma with r=0 assumption.
     d1 = (math.log(s / k) + 0.5 * sigma * sigma * t_years) / vol_sqrt_t
     return norm_pdf(d1) / (s * vol_sqrt_t)
 
@@ -227,6 +230,7 @@ def main() -> int:
                         tau_days = (k.expiry - d).days
                         if tau_days < 0:
                             continue
+                        # Minimum tenor floor avoids exploding gamma exactly at expiry.
                         t = max(tau_days / 365.0, 1.0 / 365.0)
                         g = abs(notion * bs_gamma(s=s, k=k.strike, t_years=t, sigma=args.vol_assumption))
                         if k.side == 'Call':
@@ -261,7 +265,9 @@ def main() -> int:
                             f'{dist:.6f}', f'{(dist / s):.6f}',
                         ])
 
-                # alignment: day-T gamma is start-of-day book; roll then add for next day
+                # Lookahead control:
+                # day-T output uses start-of-day inventory; expiries and new trades are applied
+                # after computation so they impact T+1.
                 for k, v in roll_by_day[p].get(d, {}).items():
                     active[k] -= v
                     if abs(active[k]) < 1e-9:

@@ -175,7 +175,8 @@ def run_trade(
             'pnl_pips': 0.0,
         }
 
-    # We start evaluating exits from the NEXT bar to avoid intrabar ordering ambiguity on entry bar.
+    # Exit evaluation starts on the next bar to avoid ambiguity between entry and exit ordering
+    # inside the same aggregated hourly candle.
     start_idx = min(idx + 1, len(bars) - 1)
 
     tp_dist = tp_pips * pip_size
@@ -190,6 +191,7 @@ def run_trade(
         sl_level = trade.entry_price + sl_dist
 
     if max_hold_mode == 'eod_ny':
+        # Session close assumption: forced close at next 5pm New York.
         ny_tz = ZoneInfo('America/New_York')
         entry_ny = trade.entry_ts.astimezone(ny_tz)
         cutoff_ny = entry_ny.replace(hour=17, minute=0, second=0, microsecond=0)
@@ -210,7 +212,7 @@ def run_trade(
         b = bars[i]
 
         if trailing_active:
-            # Conservative intrabar handling: check current stop first, then update trailing level.
+            # Conservative trail logic: evaluate current stop before moving it deeper in profit.
             if trade.side == 'long':
                 effective_stop = max(sl_level, trailing_stop if trailing_stop is not None else -1e99)
                 if b.low <= effective_stop:
@@ -236,6 +238,7 @@ def run_trade(
                 hit_sl = b.high >= sl_level
 
             if hit_tp and hit_sl:
+                # Intrabar ambiguity policy controls whether stop or target wins on same candle.
                 if intrabar_policy == 'stop':
                     exit_ts, exit_price, exit_reason = b.ts, sl_level, 'stop_and_target_same_bar_stop'
                 else:

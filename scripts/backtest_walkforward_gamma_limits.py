@@ -97,7 +97,8 @@ def main() -> int:
     start = date.fromisoformat(args.start_date)
     end = date.fromisoformat(args.end_date)
 
-    # Build prev-day close reference
+    # Reference price assumption:
+    # daily limits are anchored to prior session close to avoid same-day lookahead.
     days_sorted = sorted(hourly.keys())
     eod_close = {d: hourly[d][-1].c for d in days_sorted if hourly[d]}
     prev_close = {}
@@ -133,6 +134,9 @@ def main() -> int:
             d = date.fromordinal(d.toordinal() + 1)
             continue
 
+        # Signal mapping:
+        # - call gamma below reference => buy support candidates
+        # - put gamma above reference => sell resistance candidates
         call_below = [(k, cg) for k, cg, _ in sg if k < ref and cg > 0]
         put_above = [(k, pg) for k, _, pg in sg if k > ref and pg > 0]
 
@@ -147,6 +151,7 @@ def main() -> int:
         sell_fill_ts = ''
 
         for b in bars:
+            # Fill model assumption: a limit is filled if price range crosses the level.
             if (not math.isnan(buy)) and (buy_filled == 0) and b.l <= buy <= b.h:
                 buy_filled = 1
                 buy_fill_ts = b.ts.isoformat()

@@ -47,6 +47,7 @@ public class DailyRocPipelineMain {
 
     private static void ingestDtcc(PipelineConfig cfg, Set<String> pairs, DtccOptionTradeRepository repo) throws Exception {
         DtccPublicClient client = new DtccPublicClient();
+        // Incremental watermark: start from day after most recently ingested DTCC file date.
         LocalDate dtccStart = repo.latestSourceDate().map(d -> d.plusDays(1)).orElse(cfg.dtccBootstrapStart());
         LocalDate dtccEnd = cfg.reportDate();
         int files = client.ingestRange(cfg.dtccRegime(), cfg.dtccAsset(), dtccStart, dtccEnd, pairs, repo);
@@ -56,6 +57,7 @@ public class DailyRocPipelineMain {
     private static void updateDukascopy(PipelineConfig cfg, List<String> pairs, SqliteBarRepository barRepository) throws Exception {
         DukascopyDailyUpdater updater = new DukascopyDailyUpdater(new DukascopyBi5Client(), barRepository);
         for (String pair : pairs) {
+            // Market ingest is incremental by latest stored bar date per symbol.
             LocalDate start = barRepository.latestDate(pair).map(d -> d.plusDays(1)).orElse(cfg.marketBootstrapStart());
             long loaded = updater.updateSymbol(pair, start, cfg.reportDate());
             Optional<Instant> latest = barRepository.latestTimestamp(pair);
@@ -112,6 +114,7 @@ public class DailyRocPipelineMain {
                     LOG.warning("No rows written by limit script for " + pair + " at " + pairOut);
                     continue;
                 }
+                // Report contract: one row per pair per report date.
                 w.write(String.join(",",
                         CsvUtils.escape(row.getOrDefault("date", cfg.reportDate().toString())),
                         CsvUtils.escape(pair),
