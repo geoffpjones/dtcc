@@ -1,9 +1,12 @@
 package com.markov.fx.pipeline;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -12,6 +15,10 @@ public record PipelineConfig(
         Path dataDir,
         Path tickDir,
         String dbPath,
+        List<String> pairs,
+        Path signalSelectionPath,
+        boolean reportOnly,
+        int maxSignalStalenessDays,
         LocalDate reportDate,
         LocalDate dtccBootstrapStart,
         LocalDate marketBootstrapStart,
@@ -26,6 +33,13 @@ public record PipelineConfig(
         Path dataDir = projectRoot.resolve(m.getOrDefault("data-dir", "data")).normalize();
         Path tickDir = projectRoot.resolve(m.getOrDefault("tick-dir", "tick_data")).normalize();
         String dbPath = projectRoot.resolve(m.getOrDefault("db", "data/market-bars-5y.db")).normalize().toString();
+        List<String> pairs = parsePairs(m.getOrDefault("pairs", "EURUSD,GBPUSD,AUDUSD,USDCAD,USDJPY"));
+        Path defaultSignalSelection = projectRoot.resolve("config/signal_selection.csv").normalize();
+        Path signalSelectionPath = m.containsKey("signal-selection")
+                ? projectRoot.resolve(m.get("signal-selection")).normalize()
+                : (Files.exists(defaultSignalSelection) ? defaultSignalSelection : null);
+        boolean reportOnly = Boolean.parseBoolean(m.getOrDefault("report-only", "false"));
+        int maxSignalStalenessDays = Integer.parseInt(m.getOrDefault("max-signal-staleness-days", "5"));
         LocalDate reportDate = LocalDate.parse(m.getOrDefault(
                 "report-date",
                 LocalDate.now(ZoneOffset.UTC).minusDays(1).toString()
@@ -42,12 +56,19 @@ public record PipelineConfig(
         if (topn <= 0) {
             throw new IllegalArgumentException("--topn must be > 0");
         }
+        if (maxSignalStalenessDays < 0) {
+            throw new IllegalArgumentException("--max-signal-staleness-days must be >= 0");
+        }
 
         return new PipelineConfig(
                 projectRoot,
                 dataDir,
                 tickDir,
                 dbPath,
+                List.copyOf(pairs),
+                signalSelectionPath,
+                reportOnly,
+                maxSignalStalenessDays,
                 reportDate,
                 dtccBootstrapStart,
                 marketBootstrapStart,
@@ -61,6 +82,8 @@ public record PipelineConfig(
     private static Map<String, String> parseFlags(String[] args) {
         Set<String> allowed = Set.of(
                 "project-root", "data-dir", "tick-dir", "db",
+                "pairs",
+                "signal-selection", "report-only", "max-signal-staleness-days",
                 "report-date", "dtcc-bootstrap-start", "market-bootstrap-start",
                 "dtcc-regime", "dtcc-asset", "vol-assumption", "topn"
         );
@@ -79,6 +102,24 @@ public record PipelineConfig(
             }
             out.put(key, args[i + 1]);
             i++;
+        }
+        return out;
+    }
+
+    private static List<String> parsePairs(String rawPairs) {
+        List<String> out = new ArrayList<>();
+        for (String token : rawPairs.split(",")) {
+            String pair = token.trim().toUpperCase();
+            if (pair.isEmpty()) {
+                continue;
+            }
+            if (!pair.matches("[A-Z]{6}")) {
+                throw new IllegalArgumentException("--pairs must contain comma-separated 6-letter FX symbols: " + pair);
+            }
+            out.add(pair);
+        }
+        if (out.isEmpty()) {
+            throw new IllegalArgumentException("--pairs must contain at least one symbol");
         }
         return out;
     }

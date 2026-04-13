@@ -1,0 +1,6 @@
+pair,selected_signal,selection_asof_date,selection_basis,default_best_mode,default_test_total_pnl_pips,default_test_entries,alt_best_mode,alt_test_total_pnl_pips,alt_test_entries,selected_best_mode,selected_test_total_pnl_pips
+EURUSD,gamma_nearest_top1_md50_dec1,2026-04-13,best_test_total_pnl_pips_across_checked_in_signal_variants,fixed,160.853972,35,trail_after_tp,460.300000,208,trail_after_tp,460.300000
+GBPUSD,gamma_nearest_top1_md50_dec1,2026-04-13,best_test_total_pnl_pips_across_checked_in_signal_variants,trail_after_tp,125.833191,37,trail_after_tp,575.800000,201,trail_after_tp,575.800000
+AUDUSD,default_gamma_weighted,2026-04-13,best_test_total_pnl_pips_across_checked_in_signal_variants,trail_after_tp,-108.081379,41,trail_after_tp,-113.000000,179,trail_after_tp,-108.081379
+USDCAD,gamma_nearest_top1_md50_dec1,2026-04-13,best_test_total_pnl_pips_across_checked_in_signal_variants,fixed,-34.937193,2,trail_after_tp,538.500000,186,trail_after_tp,538.500000
+USDJPY,gamma_nearest_top1_md50_dec1,2026-04-13,best_test_total_pnl_pips_across_checked_in_signal_variants,trail_after_tp,61.450092,3,trail_after_tp,369.500000,168,trail_after_tp,369.500000

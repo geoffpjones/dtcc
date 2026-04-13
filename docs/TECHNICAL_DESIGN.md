@@ -1,7 +1,8 @@
 # DTCC FX Pipeline Technical Design
 
 ## 1. Purpose
-This project builds a daily research/trading signal dataset for `EURUSD` and `GBPUSD` by combining:
+This project builds a daily research/trading signal dataset for a configurable FX pair
+universe, currently `EURUSD,GBPUSD,AUDUSD,USDCAD,USDJPY`, by combining:
 - DTCC public FX options trade repository data,
 - Dukascopy minute spot bars,
 - gamma-proxy calculations by strike,
@@ -33,6 +34,11 @@ Daily stages:
    - run native Java walk-forward limit calculator for report date,
    - calculate both the default and alternate signal variants,
    - persist report rows to SQLite and csv.
+
+For operator workflows that only need fresh daily levels from already prepared data,
+the pipeline also supports a report-only mode.
+- `--report-only true` skips DTCC ingest, Dukascopy ingest, hourly export and gamma recomputation
+- it reads the existing hourly and strike-gamma files already present under `tick_data/` and `data/`
 
 ## 3. Storage Model (SQLite)
 Default DB: `data/market-bars-5y.db`
@@ -107,6 +113,14 @@ Current daily report contains two signal variants:
   - max 50 pip distance from prior close,
   - distance decay power 1
 
+The production report also exposes a pair-selected signal view based on the latest
+external signal-selection configuration.
+- the pipeline does not infer “best” from repo contents
+- selection is supplied via an external CSV with columns `pair,selected_signal`
+- the repo currently carries a checked-in selection snapshot at `config/signal_selection.csv`
+- that snapshot is backed by `config/signal_selection_backtest_snapshot_2026-04-13.csv`
+- when no selection file is supplied, the selected production signal defaults to `default_gamma_weighted`
+
 ### 4.6 Execution simulation
 Backtests use hourly bars with intrabar assumptions:
 - fills are assumed when limit lies within `[low, high]`,
@@ -127,19 +141,18 @@ Backtests use hourly bars with intrabar assumptions:
 - DTCC product classification relies on field heuristics and UPI text matching.
 - Gamma sizing still relies on heuristic notional proxy rather than contract-normalized Greeks.
 - Strategy performance metrics depend on hourly bar assumptions.
-- Current pair scope in Java orchestrator is fixed to `EURUSD,GBPUSD`.
+- Pair scope is controlled by the `--pairs` flag.
 
 ## 8. Engineering Plan
 
 ### Near-term hardening
-1. Move pair universe to config flag and validate symbols.
-2. Add structured logging format and run-id correlation.
-3. Add integration tests with a small fixture DB + fixture DTCC zip.
-4. Add data-quality checks:
+1. Add structured logging format and run-id correlation.
+2. Add integration tests with a small fixture DB + fixture DTCC zip.
+3. Add data-quality checks:
    - missing-day detection,
    - monotonic timestamp checks,
    - duplicate row diagnostics.
-5. Add alternate signal modes to the Java limit calculator without regressing the default path.
+4. Add alternate signal modes to the Java limit calculator without regressing the default path.
 
 ### Mid-term improvements
 1. Replace heuristic notional proxy with pair-consistent base-currency normalization.
