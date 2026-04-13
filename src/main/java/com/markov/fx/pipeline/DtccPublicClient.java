@@ -183,7 +183,7 @@ public class DtccPublicClient {
         return new ParseResult(totalRows, optionRows);
     }
 
-    private static boolean isOptionRow(Map<String, String> row) {
+    static boolean isOptionRow(Map<String, String> row) {
         String embedded = row.getOrDefault("Embedded Option type", "").trim();
         String otype = row.getOrDefault("Option Type", "").trim();
         String ostyle = row.getOrDefault("Option Style", "").trim();

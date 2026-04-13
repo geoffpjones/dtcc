@@ -25,7 +25,7 @@ dependencies {
 }
 
 application {
-    mainClass = 'com.markov.fx.pipeline.DailyRocPipelineMain'
+    mainClass = project.findProperty('mainClass') ?: 'com.markov.fx.pipeline.DailyRocPipelineMain'
 }
 
 test {

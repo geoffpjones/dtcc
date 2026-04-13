@@ -26,6 +26,12 @@ To generate report rows only from existing hourly/gamma files:
 ./scripts/run_daily_roc_pipeline.sh --report-date 2026-04-13 --report-only true
 ```
 
+To repair `dtcc_option_trades` from a local DTCC CSV extract:
+
+```bash
+gradle -q run -PmainClass=com.markov.fx.pipeline.DtccOptionsCsvBackfillMain --args="--options-input-csv data/options_data_full.csv --pairs AUDUSD,USDCAD,USDJPY"
+```
+
 Default `--report-date` is yesterday UTC.
 
 ## Important Paths
