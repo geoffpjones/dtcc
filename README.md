@@ -69,6 +69,7 @@ Created tables:
 - `--tick-dir` (default: `tick_data`)
 - `--db` (default: `data/market-bars-5y.db`)
 - `--pairs` (comma-separated FX symbols; default: `EURUSD,GBPUSD,AUDUSD,USDCAD,USDJPY`)
+- `--options-input-csv` (optional CSV override for gamma input; if supplied, skip DB export and use this file directly)
 - `--signal-selection` (optional CSV with columns `pair,selected_signal`; default is `config/signal_selection.csv` when present)
 - `--report-only` (`true|false`, default: `false`) to skip ingest/recalc and only write report rows from existing files
 - `--report-date` (YYYY-MM-DD)
