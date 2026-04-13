@@ -4,20 +4,16 @@ import com.markov.fx.ingest.DukascopyBi5Client;
 import com.markov.fx.store.SqliteBarRepository;
 import com.markov.fx.util.CsvUtils;
 
-import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Logger;
 
 public class DailyRocPipelineMain {
@@ -89,96 +85,94 @@ public class DailyRocPipelineMain {
         Path reportDir = cfg.dataDir().resolve("reports");
         Files.createDirectories(reportDir);
         Path reportCsv = reportDir.resolve("fx_limit_order_report_" + cfg.reportDate() + ".csv");
+        LimitSignalCalculator calculator = new LimitSignalCalculator();
 
         try (BufferedWriter w = Files.newBufferedWriter(reportCsv)) {
-            w.write("date,pair,ref_price_prev_close,buy_limit,sell_limit,eod_close,notes");
+            w.write("date,pair,ref_price_prev_close,eod_close,"
+                    + "default_buy_limit,default_sell_limit,default_notes,"
+                    + "alt_buy_limit,alt_sell_limit,alt_notes");
             w.newLine();
             for (String pair : pairs) {
-                Path pairOut = reportDir.resolve(pair.toLowerCase() + "_walkforward_limit_" + cfg.reportDate() + ".csv");
-                List<String> cmd = List.of(
-                        cfg.pythonExec(),
-                        "scripts/backtest_walkforward_gamma_limits.py",
-                        "--strike-gamma", cfg.dataDir().resolve(pair.toLowerCase() + "_gamma_proxy_by_strike_call_put.csv").toString(),
-                        "--hourly", cfg.tickDir().resolve(pair.toLowerCase() + "_1h.csv").toString(),
-                        "--start-date", cfg.reportDate().toString(),
-                        "--end-date", cfg.reportDate().toString(),
-                        "--topn", Integer.toString(cfg.topn()),
-                        "--output", pairOut.toString()
+                Path defaultOut = reportDir.resolve(pair.toLowerCase() + "_walkforward_limit_default_" + cfg.reportDate() + ".csv");
+                Path altOut = reportDir.resolve(pair.toLowerCase() + "_walkforward_limit_alt_" + cfg.reportDate() + ".csv");
+                // The daily pipeline is intentionally pure Java at runtime: strike gamma and
+                // walk-forward limit generation both execute natively without shelling out.
+                calculator.writeLimitFile(
+                        cfg.dataDir().resolve(pair.toLowerCase() + "_gamma_proxy_by_strike_call_put.csv"),
+                        cfg.tickDir().resolve(pair.toLowerCase() + "_1h.csv"),
+                        cfg.reportDate(),
+                        cfg.reportDate(),
+                        new LimitSignalCalculator.SignalSpec(
+                                LimitSignalCalculator.DEFAULT_SIGNAL.name(),
+                                LimitSignalCalculator.DEFAULT_SIGNAL.weightMode(),
+                                LimitSignalCalculator.DEFAULT_SIGNAL.levelMode(),
+                                cfg.topn(),
+                                LimitSignalCalculator.DEFAULT_SIGNAL.maxDistancePips(),
+                                LimitSignalCalculator.DEFAULT_SIGNAL.distanceDecayPower(),
+                                LimitSignalCalculator.DEFAULT_SIGNAL.pipScale()
+                        ),
+                        defaultOut
                 );
-                runCommand(cmd, cfg.projectRoot(), cfg.commandTimeoutSeconds());
-
-                Map<String, String> row = readFirstCsvRow(pairOut);
-                if (row.isEmpty()) {
-                    LOG.warning("No rows written by limit script for " + pair + " at " + pairOut);
+                calculator.writeLimitFile(
+                        cfg.dataDir().resolve(pair.toLowerCase() + "_gamma_proxy_by_strike_call_put.csv"),
+                        cfg.tickDir().resolve(pair.toLowerCase() + "_1h.csv"),
+                        cfg.reportDate(),
+                        cfg.reportDate(),
+                        LimitSignalCalculator.ALT_SIGNAL,
+                        altOut
+                );
+                List<LimitSignalCalculator.LimitRow> defaultRows = calculator.buildRowsFromFiles(
+                        cfg.dataDir().resolve(pair.toLowerCase() + "_gamma_proxy_by_strike_call_put.csv"),
+                        cfg.tickDir().resolve(pair.toLowerCase() + "_1h.csv"),
+                        cfg.reportDate(),
+                        cfg.reportDate(),
+                        new LimitSignalCalculator.SignalSpec(
+                                LimitSignalCalculator.DEFAULT_SIGNAL.name(),
+                                LimitSignalCalculator.DEFAULT_SIGNAL.weightMode(),
+                                LimitSignalCalculator.DEFAULT_SIGNAL.levelMode(),
+                                cfg.topn(),
+                                LimitSignalCalculator.DEFAULT_SIGNAL.maxDistancePips(),
+                                LimitSignalCalculator.DEFAULT_SIGNAL.distanceDecayPower(),
+                                LimitSignalCalculator.DEFAULT_SIGNAL.pipScale()
+                        )
+                );
+                List<LimitSignalCalculator.LimitRow> altRows = calculator.buildRowsFromFiles(
+                        cfg.dataDir().resolve(pair.toLowerCase() + "_gamma_proxy_by_strike_call_put.csv"),
+                        cfg.tickDir().resolve(pair.toLowerCase() + "_1h.csv"),
+                        cfg.reportDate(),
+                        cfg.reportDate(),
+                        LimitSignalCalculator.ALT_SIGNAL
+                );
+                if (defaultRows.isEmpty() || altRows.isEmpty()) {
+                    LOG.warning("No rows written by Java limit calculator for " + pair + " at " + defaultOut + " / " + altOut);
                     continue;
                 }
+                LimitSignalCalculator.LimitRow defaultRow = defaultRows.get(0);
+                LimitSignalCalculator.LimitRow altRow = altRows.get(0);
                 // Report contract: one row per pair per report date.
                 w.write(String.join(",",
-                        CsvUtils.escape(row.getOrDefault("date", cfg.reportDate().toString())),
+                        CsvUtils.escape(defaultRow.date().toString()),
                         CsvUtils.escape(pair),
-                        CsvUtils.escape(row.getOrDefault("ref_price_prev_close", "")),
-                        CsvUtils.escape(row.getOrDefault("buy_limit", "")),
-                        CsvUtils.escape(row.getOrDefault("sell_limit", "")),
-                        CsvUtils.escape(row.getOrDefault("eod_close", "")),
-                        CsvUtils.escape(row.getOrDefault("notes", ""))));
+                        CsvUtils.escape(fmt(defaultRow.refPricePrevClose())),
+                        CsvUtils.escape(fmt(defaultRow.eodClose())),
+                        CsvUtils.escape(fmt(defaultRow.buyLimit())),
+                        CsvUtils.escape(fmt(defaultRow.sellLimit())),
+                        CsvUtils.escape(defaultRow.notes()),
+                        CsvUtils.escape(fmt(altRow.buyLimit())),
+                        CsvUtils.escape(fmt(altRow.sellLimit())),
+                        CsvUtils.escape(altRow.notes())));
                 w.newLine();
 
-                optionRepo.upsertLimitReportRow(cfg.reportDate(), pair, row);
+                optionRepo.upsertLimitReportRow(cfg.reportDate(), pair, defaultRow, altRow);
             }
         }
         return reportCsv;
     }
 
-    private static Map<String, String> readFirstCsvRow(Path csvPath) throws IOException {
-        try (BufferedReader r = Files.newBufferedReader(csvPath)) {
-            String header = r.readLine();
-            String first = r.readLine();
-            if (header == null || first == null) {
-                return Map.of();
-            }
-            List<String> h = CsvUtils.parseLine(header);
-            List<String> v = CsvUtils.parseLine(first);
-            Map<String, String> out = new LinkedHashMap<>();
-            for (int i = 0; i < h.size(); i++) {
-                out.put(h.get(i), i < v.size() ? v.get(i) : "");
-            }
-            return out;
+    private static String fmt(double value) {
+        if (Double.isNaN(value) || Double.isInfinite(value)) {
+            return "";
         }
-    }
-
-    private static void runCommand(List<String> cmd, Path workDir, long timeoutSec) throws Exception {
-        ProcessBuilder pb = new ProcessBuilder(cmd);
-        pb.directory(workDir.toFile());
-        pb.redirectErrorStream(true);
-        Process p = pb.start();
-
-        AtomicReference<Throwable> readerError = new AtomicReference<>(null);
-        Thread readerThread = new Thread(() -> {
-            try (BufferedReader r = p.inputReader()) {
-                String line;
-                while ((line = r.readLine()) != null) {
-                    System.out.println(line);
-                }
-            } catch (Throwable t) {
-                readerError.set(t);
-            }
-        }, "cmd-output-" + Integer.toHexString(cmd.hashCode()));
-        readerThread.setDaemon(true);
-        readerThread.start();
-
-        boolean done = p.waitFor(timeoutSec, TimeUnit.SECONDS);
-        if (!done) {
-            p.destroyForcibly();
-            readerThread.join(5_000L);
-            throw new RuntimeException("Command timed out after " + timeoutSec + "s: " + String.join(" ", cmd));
-        }
-        readerThread.join(5_000L);
-        if (readerError.get() != null) {
-            throw new RuntimeException("Failed reading command output for: " + String.join(" ", cmd), readerError.get());
-        }
-        int rc = p.exitValue();
-        if (rc != 0) {
-            throw new RuntimeException("Command failed rc=" + rc + " cmd=" + String.join(" ", cmd));
-        }
+        return Double.toString(value);
     }
 }

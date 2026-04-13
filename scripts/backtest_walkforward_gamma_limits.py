@@ -26,6 +26,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument('--start-date', default='2025-11-11')
     p.add_argument('--end-date', default='2026-03-31')
     p.add_argument('--topn', type=int, default=10)
+    p.add_argument('--weight-mode', choices=['gamma', 'notional'], default='gamma')
+    p.add_argument('--level-mode', choices=['weighted', 'nearest'], default='weighted')
+    p.add_argument('--max-distance-pips', type=float, default=0.0, help='0 disables the filter')
+    p.add_argument('--distance-decay-power', type=float, default=0.0, help='0 disables decay; otherwise weight /= distance^power')
+    p.add_argument('--pip-size', type=float, default=0.0001, help='Price units per pip')
     p.add_argument('--output', default='/home/geoffpjones/projects/dtcc/data/eurusd_walkforward_gamma_limits_2025-11-11_to_2026-03-31.csv')
     return p.parse_args()
 
@@ -53,32 +58,57 @@ def load_hourly(path: Path) -> dict[date, list[HourBar]]:
     return grouped
 
 
-def load_strike_gamma(path: Path) -> dict[date, list[tuple[float, float, float]]]:
-    # date -> list[(strike, call_gamma_abs, put_gamma_abs)]
-    out: dict[date, list[tuple[float, float, float]]] = defaultdict(list)
+def load_strike_gamma(path: Path) -> dict[date, list[dict[str, float]]]:
+    # date -> list[{strike, active_call_notional, active_put_notional, call_gamma_abs, put_gamma_abs}]
+    out: dict[date, list[dict[str, float]]] = defaultdict(list)
     with path.open(newline='', encoding='utf-8') as fh:
         r = csv.DictReader(fh)
         for row in r:
             d = date.fromisoformat(row['date'])
             strike = f(row['strike'])
+            acn = f(row['active_call_notional'])
+            apn = f(row['active_put_notional'])
             cg = f(row['call_gamma_abs_per_usd'])
             pg = f(row['put_gamma_abs_per_usd'])
             if math.isnan(strike):
                 continue
-            out[d].append((strike, 0.0 if math.isnan(cg) else cg, 0.0 if math.isnan(pg) else pg))
+            out[d].append({
+                'strike': strike,
+                'active_call_notional': 0.0 if math.isnan(acn) else acn,
+                'active_put_notional': 0.0 if math.isnan(apn) else apn,
+                'call_gamma_abs_per_usd': 0.0 if math.isnan(cg) else cg,
+                'put_gamma_abs_per_usd': 0.0 if math.isnan(pg) else pg,
+            })
     return out
 
 
-def weighted_topn(levels: list[tuple[float, float]], topn: int) -> float:
+def select_weights(row: dict[str, float], weight_mode: str) -> tuple[float, float]:
+    if weight_mode == 'notional':
+        return row['active_call_notional'], row['active_put_notional']
+    return row['call_gamma_abs_per_usd'], row['put_gamma_abs_per_usd']
+
+
+def adjust_weight(raw_weight: float, distance_price: float, pip_size: float, decay_power: float) -> float:
+    if raw_weight <= 0:
+        return 0.0
+    if decay_power <= 0:
+        return raw_weight
+    distance_pips = max(abs(distance_price) / pip_size, 1.0)
+    return raw_weight / (distance_pips ** decay_power)
+
+
+def select_level(levels: list[tuple[float, float, float]], topn: int, level_mode: str) -> float:
     # levels: [(price, weight)]
-    clean = [(p, w) for p, w in levels if not (math.isnan(p) or math.isnan(w)) and w > 0]
+    clean = [(p, w, abs(d)) for p, w, d in levels if not (math.isnan(p) or math.isnan(w)) and w > 0]
     if not clean:
         return float('nan')
     top = sorted(clean, key=lambda x: x[1], reverse=True)[:topn]
-    wsum = sum(w for _, w in top)
+    if level_mode == 'nearest':
+        return min(top, key=lambda x: x[2])[0]
+    wsum = sum(w for _, w, _ in top)
     if wsum <= 0:
         return float('nan')
-    return sum(p * w for p, w in top) / wsum
+    return sum(p * w for p, w, _ in top) / wsum
 
 
 def fmt(x) -> str:
@@ -129,19 +159,41 @@ def main() -> int:
                 'buy_pnl_pips': 0.0,
                 'sell_pnl_pips': 0.0,
                 'net_pnl_pips': 0.0,
-                'notes': 'missing_hourly_or_strike_gamma_or_ref',
+                'notes': (
+                    f'missing_hourly_or_strike_gamma_or_ref'
+                    f'|weight_mode={args.weight_mode}'
+                    f'|level_mode={args.level_mode}'
+                    f'|max_distance_pips={args.max_distance_pips:g}'
+                    f'|distance_decay_power={args.distance_decay_power:g}'
+                ),
             })
             d = date.fromordinal(d.toordinal() + 1)
             continue
 
         # Signal mapping:
-        # - call gamma below reference => buy support candidates
-        # - put gamma above reference => sell resistance candidates
-        call_below = [(k, cg) for k, cg, _ in sg if k < ref and cg > 0]
-        put_above = [(k, pg) for k, _, pg in sg if k > ref and pg > 0]
+        # - call strikes below reference => buy support candidates
+        # - put strikes above reference => sell resistance candidates
+        # Weighting can use gamma magnitude or active notional concentration.
+        # We optionally force levels to stay closer to the market by filtering distant
+        # strikes and/or decaying their contribution by distance from the prior close.
+        call_below = []
+        put_above = []
+        for row in sg:
+            strike = row['strike']
+            call_weight, put_weight = select_weights(row, args.weight_mode)
+            signed_distance = strike - ref
+            distance_pips = abs(signed_distance) / args.pip_size
+            if args.max_distance_pips > 0 and distance_pips > args.max_distance_pips:
+                continue
+            if strike < ref and call_weight > 0:
+                adj = adjust_weight(call_weight, signed_distance, args.pip_size, args.distance_decay_power)
+                call_below.append((strike, adj, signed_distance))
+            if strike > ref and put_weight > 0:
+                adj = adjust_weight(put_weight, signed_distance, args.pip_size, args.distance_decay_power)
+                put_above.append((strike, adj, signed_distance))
 
-        buy = weighted_topn(call_below, args.topn)
-        sell = weighted_topn(put_above, args.topn)
+        buy = select_level(call_below, args.topn, args.level_mode)
+        sell = select_level(put_above, args.topn, args.level_mode)
 
         eod = bars[-1].c
 
@@ -166,6 +218,13 @@ def main() -> int:
         note = ''
         if buy_filled and sell_filled:
             note = 'both_filled_intraday_order_ambiguous_with_1h_bars'
+        tag = (
+            f'weight_mode={args.weight_mode}'
+            f'|level_mode={args.level_mode}'
+            f'|max_distance_pips={args.max_distance_pips:g}'
+            f'|distance_decay_power={args.distance_decay_power:g}'
+        )
+        note = f'{note}|{tag}' if note else tag
 
         rows.append({
             'date': d.isoformat(),

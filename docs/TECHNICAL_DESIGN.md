@@ -30,7 +30,8 @@ Daily stages:
    - run native Java gamma builder,
    - write daily and strike-level call/put gamma csv outputs.
 5. Limit report:
-   - call python `scripts/backtest_walkforward_gamma_limits.py` for report date,
+   - run native Java walk-forward limit calculator for report date,
+   - calculate both the default and alternate signal variants,
    - persist report rows to SQLite and csv.
 
 ## 3. Storage Model (SQLite)
@@ -48,6 +49,7 @@ Tables:
   - prevents duplicate file processing
 - `gamma_limit_reports`
   - per-day, per-pair final limit report rows
+  - stores both default and alternate signal levels
 
 Bootstrap behavior:
 - DB directories are auto-created.
@@ -60,6 +62,14 @@ Bootstrap behavior:
 Gamma uses a simplified notional proxy:
 - option notional is approximated from DTCC leg notionals in pair currencies,
 - this is a practical heuristic, not a full premium-adjusted exposure model.
+
+### 4.1a Vanilla instrument filter
+The default vanilla gamma proxy intentionally includes only DTCC rows whose `UPI FISN`
+starts with `NA/O Van`.
+- this keeps the signal focused on plain vanilla OTC options,
+- it excludes digitals, NDOs and other exotic/non-standard structures,
+- those products are omitted because their greeks and hedging behaviour are not
+  comparable to the plain-vanilla gamma proxy used by the limit logic.
 
 ### 4.2 Volatility assumption
 Gamma uses a fixed sigma (`--vol-assumption`, default `0.10`) for Black-Scholes gamma.
@@ -80,12 +90,22 @@ The Java gamma builder writes two files per pair:
 - `*_gamma_proxy_by_strike_call_put.csv`
   - strike-level active notionals and call/put gamma
 
-These outputs are intentionally schema-compatible with the existing downstream Python limit-report step.
+These outputs are consumed directly by the native Java limit calculator.
 
 ### 4.5 Limit derivation
 Daily buy/sell levels are weighted averages of top gamma strikes:
 - buy side from call-gamma strikes below previous close,
 - sell side from put-gamma strikes above previous close.
+
+Current daily report contains two signal variants:
+- `default_gamma_weighted`
+  - gamma-weighted average of top strikes on each side
+- `gamma_nearest_top1_md50_dec1`
+  - gamma-weighted ranking,
+  - nearest selected strike,
+  - top 1 candidate,
+  - max 50 pip distance from prior close,
+  - distance decay power 1
 
 ### 4.6 Execution simulation
 Backtests use hourly bars with intrabar assumptions:
@@ -95,13 +115,12 @@ Backtests use hourly bars with intrabar assumptions:
 
 ## 5. Operational Assumptions
 - Pipeline runs once daily after DTCC/market data for prior day is available.
-- Python is still required for limit-report and backtest scripts.
-- Gamma recomputation no longer depends on Python.
+- Daily runtime is pure Java.
+- Python is only required for offline research/backtest scripts.
 - Network access is required for DTCC and Dukascopy pulls.
 
 ## 6. Failure Modes and Handling
 - Stage failures raise runtime errors and fail pipeline.
-- external commands have timeout (`--command-timeout-sec`).
 - DTCC and Dukascopy ingestion are incremental; reruns are idempotent on existing data.
 
 ## 7. Known Limitations
@@ -120,7 +139,7 @@ Backtests use hourly bars with intrabar assumptions:
    - missing-day detection,
    - monotonic timestamp checks,
    - duplicate row diagnostics.
-5. Re-implement daily limit generation in Java to remove the remaining Python runtime dependency.
+5. Add alternate signal modes to the Java limit calculator without regressing the default path.
 
 ### Mid-term improvements
 1. Replace heuristic notional proxy with pair-consistent base-currency normalization.

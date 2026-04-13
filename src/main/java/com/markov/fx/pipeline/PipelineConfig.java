@@ -12,15 +12,13 @@ public record PipelineConfig(
         Path dataDir,
         Path tickDir,
         String dbPath,
-        String pythonExec,
         LocalDate reportDate,
         LocalDate dtccBootstrapStart,
         LocalDate marketBootstrapStart,
         String dtccRegime,
         String dtccAsset,
         double volAssumption,
-        int topn,
-        long commandTimeoutSeconds
+        int topn
 ) {
     static PipelineConfig parse(String[] args) {
         Map<String, String> m = parseFlags(args);
@@ -28,7 +26,6 @@ public record PipelineConfig(
         Path dataDir = projectRoot.resolve(m.getOrDefault("data-dir", "data")).normalize();
         Path tickDir = projectRoot.resolve(m.getOrDefault("tick-dir", "tick_data")).normalize();
         String dbPath = projectRoot.resolve(m.getOrDefault("db", "data/market-bars-5y.db")).normalize().toString();
-        String pythonExec = m.getOrDefault("python", "python3");
         LocalDate reportDate = LocalDate.parse(m.getOrDefault(
                 "report-date",
                 LocalDate.now(ZoneOffset.UTC).minusDays(1).toString()
@@ -41,13 +38,9 @@ public record PipelineConfig(
         String dtccAsset = m.getOrDefault("dtcc-asset", "FX");
         double volAssumption = Double.parseDouble(m.getOrDefault("vol-assumption", "0.10"));
         int topn = Integer.parseInt(m.getOrDefault("topn", "10"));
-        long timeout = Long.parseLong(m.getOrDefault("command-timeout-sec", "7200"));
 
         if (topn <= 0) {
             throw new IllegalArgumentException("--topn must be > 0");
-        }
-        if (timeout <= 0) {
-            throw new IllegalArgumentException("--command-timeout-sec must be > 0");
         }
 
         return new PipelineConfig(
@@ -55,24 +48,21 @@ public record PipelineConfig(
                 dataDir,
                 tickDir,
                 dbPath,
-                pythonExec,
                 reportDate,
                 dtccBootstrapStart,
                 marketBootstrapStart,
                 dtccRegime,
                 dtccAsset,
                 volAssumption,
-                topn,
-                timeout
+                topn
         );
     }
 
     private static Map<String, String> parseFlags(String[] args) {
         Set<String> allowed = Set.of(
-                "project-root", "data-dir", "tick-dir", "db", "python",
+                "project-root", "data-dir", "tick-dir", "db",
                 "report-date", "dtcc-bootstrap-start", "market-bootstrap-start",
-                "dtcc-regime", "dtcc-asset", "vol-assumption", "topn",
-                "command-timeout-sec"
+                "dtcc-regime", "dtcc-asset", "vol-assumption", "topn"
         );
         Map<String, String> out = new HashMap<>();
         for (int i = 0; i < args.length; i++) {

@@ -49,6 +49,10 @@ def option_side(upi: str) -> str | None:
     return None
 
 
+def is_supported_vanilla_upi(upi: str) -> bool:
+    return upi.upper().startswith('NA/O VAN ')
+
+
 def eur_like_notional(row: dict[str, str], ccy_a: str, ccy_b: str) -> float:
     # Exposure proxy assumption:
     # We approximate option size as the sum of leg notionals denominated in either pair currency.
@@ -138,7 +142,10 @@ def main() -> int:
             upi = (row.get('UPI FISN') or '').strip()
             if (row.get('Action type') or '').strip() != 'NEWT':
                 continue
-            if not args.include_exotics and ' Van ' not in upi:
+            # Vanilla gamma is intentionally restricted to the NA/O Van* UPI family.
+            # Digitals and other exotic structures need different greek treatment and
+            # should not be mixed into the plain-vanilla strike gamma proxy.
+            if not args.include_exotics and not is_supported_vanilla_upi(upi):
                 continue
 
             side = option_side(upi)

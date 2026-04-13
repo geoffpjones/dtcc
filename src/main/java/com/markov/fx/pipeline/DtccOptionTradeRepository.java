@@ -83,6 +83,9 @@ public class DtccOptionTradeRepository {
                     sell_limit REAL,
                     eod_close REAL,
                     notes TEXT,
+                    alt_buy_limit REAL,
+                    alt_sell_limit REAL,
+                    alt_notes TEXT,
                     generated_at_utc TEXT NOT NULL,
                     PRIMARY KEY (trade_date, pair)
                 )
@@ -94,10 +97,23 @@ public class DtccOptionTradeRepository {
             st.execute("CREATE INDEX IF NOT EXISTS idx_dtcc_pair_date ON dtcc_option_trades(pair, source_date)");
             st.execute(filesDdl);
             st.execute(reportsDdl);
+            ensureColumn(st, "gamma_limit_reports", "alt_buy_limit", "REAL");
+            ensureColumn(st, "gamma_limit_reports", "alt_sell_limit", "REAL");
+            ensureColumn(st, "gamma_limit_reports", "alt_notes", "TEXT");
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize DTCC SQLite schema", e);
         }
         LOG.info(() -> "SQLite schema ready at " + dbPath);
+    }
+
+    private void ensureColumn(Statement st, String table, String column, String type) throws SQLException {
+        try {
+            st.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + type);
+        } catch (SQLException e) {
+            if (e.getMessage() == null || !e.getMessage().toLowerCase().contains("duplicate column")) {
+                throw e;
+            }
+        }
     }
 
     public Optional<LocalDate> latestSourceDate() {
@@ -266,29 +282,41 @@ public class DtccOptionTradeRepository {
         }
     }
 
-    public void upsertLimitReportRow(LocalDate tradeDate, String pair, Map<String, String> row) {
+    public void upsertLimitReportRow(
+            LocalDate tradeDate,
+            String pair,
+            LimitSignalCalculator.LimitRow defaultRow,
+            LimitSignalCalculator.LimitRow altRow
+    ) {
         String sql = """
                 INSERT INTO gamma_limit_reports(
-                    trade_date, pair, ref_price_prev_close, buy_limit, sell_limit, eod_close, notes, generated_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    trade_date, pair, ref_price_prev_close, buy_limit, sell_limit, eod_close, notes,
+                    alt_buy_limit, alt_sell_limit, alt_notes, generated_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(trade_date, pair) DO UPDATE SET
                     ref_price_prev_close=excluded.ref_price_prev_close,
                     buy_limit=excluded.buy_limit,
                     sell_limit=excluded.sell_limit,
                     eod_close=excluded.eod_close,
                     notes=excluded.notes,
+                    alt_buy_limit=excluded.alt_buy_limit,
+                    alt_sell_limit=excluded.alt_sell_limit,
+                    alt_notes=excluded.alt_notes,
                     generated_at_utc=excluded.generated_at_utc
                 """;
         try (Connection c = DriverManager.getConnection(dbUrl);
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, tradeDate.toString());
             ps.setString(2, pair);
-            setNullableDouble(ps, 3, parseNullableDouble(row.get("ref_price_prev_close")));
-            setNullableDouble(ps, 4, parseNullableDouble(row.get("buy_limit")));
-            setNullableDouble(ps, 5, parseNullableDouble(row.get("sell_limit")));
-            setNullableDouble(ps, 6, parseNullableDouble(row.get("eod_close")));
-            ps.setString(7, row.getOrDefault("notes", ""));
-            ps.setString(8, Instant.now().toString());
+            setNullableDouble(ps, 3, defaultRow.refPricePrevClose());
+            setNullableDouble(ps, 4, defaultRow.buyLimit());
+            setNullableDouble(ps, 5, defaultRow.sellLimit());
+            setNullableDouble(ps, 6, defaultRow.eodClose());
+            ps.setString(7, defaultRow.notes());
+            setNullableDouble(ps, 8, altRow.buyLimit());
+            setNullableDouble(ps, 9, altRow.sellLimit());
+            ps.setString(10, altRow.notes());
+            ps.setString(11, Instant.now().toString());
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to save gamma_limit_reports row for " + pair + " " + tradeDate, e);
@@ -304,17 +332,6 @@ public class DtccOptionTradeRepository {
             return "";
         }
         return Double.toString(v);
-    }
-
-    private static Double parseNullableDouble(String v) {
-        if (v == null || v.isBlank()) {
-            return null;
-        }
-        try {
-            return Double.parseDouble(v);
-        } catch (Exception e) {
-            return null;
-        }
     }
 
     private static void setNullableDouble(PreparedStatement ps, int idx, Double value) throws SQLException {

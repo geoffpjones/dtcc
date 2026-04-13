@@ -4,12 +4,13 @@ Daily pipeline for `EURUSD` and `GBPUSD` that:
 - ingests DTCC public FX options data,
 - ingests Dukascopy 1-minute bars,
 - recalculates gamma proxy files,
-- generates daily buy/sell limit report rows.
+- generates daily buy/sell limit report rows for both:
+  - default gamma-weighted signal
+  - alternate `gamma_nearest_top1_md50_dec1` signal
 
 ## Stack
 - Java 17+
 - Gradle
-- Python 3 (used by existing `scripts/*.py` gamma/limit calculators)
 
 ## Run
 From repo root:
@@ -32,6 +33,11 @@ Default `--report-date` is yesterday UTC.
   - `data/gbpusd_gamma_proxy_by_strike_call_put.csv`
 - Daily report:
   - `data/reports/fx_limit_order_report_<YYYY-MM-DD>.csv`
+  - columns include both default and alternate levels:
+    - `default_buy_limit`
+    - `default_sell_limit`
+    - `alt_buy_limit`
+    - `alt_sell_limit`
 
 ## SQLite Bootstrap Behavior
 No DB file or tables need to exist in git.
@@ -48,7 +54,6 @@ Created tables:
 - `--data-dir` (default: `data`)
 - `--tick-dir` (default: `tick_data`)
 - `--db` (default: `data/market-bars-5y.db`)
-- `--python` (default: `python3`)
 - `--report-date` (YYYY-MM-DD)
 - `--dtcc-bootstrap-start` (default: `2025-04-10`)
 - `--market-bootstrap-start` (default: `report-date - 5y`)
@@ -60,4 +65,6 @@ Created tables:
 ## Notes
 - DTCC ingest is incremental by file (`dtcc_ingested_files`).
 - Dukascopy ingest is incremental by latest stored bar date per pair.
-- Daily limits use existing Python strategy logic in `scripts/backtest_walkforward_gamma_limits.py`.
+- Daily runtime is pure Java: DTCC ingest, hourly export, gamma recomputation and limit generation do not shell out to Python.
+- The report persists the default signal into legacy `buy_limit` / `sell_limit` / `notes` columns and also stores alternate signal columns `alt_buy_limit` / `alt_sell_limit` / `alt_notes`.
+- Python scripts remain in the repo for research and backtesting only.

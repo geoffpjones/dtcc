@@ -12,16 +12,12 @@ class PipelineConfigTest {
                 "--project-root", "/tmp/project",
                 "--report-date", "2026-04-11",
                 "--topn", "7",
-                "--vol-assumption", "0.2",
-                "--command-timeout-sec", "300",
-                "--python", "python3.12"
+                "--vol-assumption", "0.2"
         });
 
         assertEquals("/tmp/project/data/market-bars-5y.db", cfg.dbPath());
         assertEquals(7, cfg.topn());
         assertEquals(0.2, cfg.volAssumption());
-        assertEquals(300L, cfg.commandTimeoutSeconds());
-        assertEquals("python3.12", cfg.pythonExec());
         assertEquals("2026-04-11", cfg.reportDate().toString());
     }
 
@@ -32,10 +28,4 @@ class PipelineConfigTest {
         }));
     }
 
-    @Test
-    void parse_rejectsInvalidTimeout() {
-        assertThrows(IllegalArgumentException.class, () -> PipelineConfig.parse(new String[]{
-                "--command-timeout-sec", "-1"
-        }));
-    }
 }

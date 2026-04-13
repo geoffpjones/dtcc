@@ -77,7 +77,10 @@ public class GammaRecalculator {
                 if (!"NEWT".equals(text(row, "Action type"))) {
                     continue;
                 }
-                if (!includeExotics && !isVanilla(upiUpper)) {
+                // Vanilla gamma uses only the UPI-tagged NA/O Van* family.
+                // This avoids mixing in digitals, NDOs and other non-linear structures
+                // whose gamma behaviour is materially different from plain vanilla options.
+                if (!includeExotics && !isSupportedVanillaUpi(upiUpper)) {
                     continue;
                 }
 
@@ -304,8 +307,8 @@ public class GammaRecalculator {
         return null;
     }
 
-    private static boolean isVanilla(String upiUpper) {
-        return upiUpper.contains(" VAN ") || upiUpper.contains("VANILLA");
+    private static boolean isSupportedVanillaUpi(String upiUpper) {
+        return upiUpper.startsWith("NA/O VAN ");
     }
 
     private static LocalDate parseDay(String value) {
