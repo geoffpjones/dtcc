@@ -1,0 +1,17 @@
+pair,series,mode,tp_pips,sl_pips,trail_pips,entries,wins,losses,win_rate,avg_pnl_pips,total_pnl_pips
+audusd,train_best_fixed,fixed,40,40,,64,38,26,0.593750,2.554527,163.489753
+audusd,test_with_best_fixed,fixed,40,40,,41,19,22,0.463415,-4.233096,-173.556946
+audusd,train_best_trailing,trail_after_tp,25,40,5,64,39,25,0.609375,3.368161,215.562329
+audusd,test_with_best_trailing,trail_after_tp,25,40,5,41,21,20,0.512195,-2.636131,-108.081379
+gbpusd,train_best_fixed,fixed,40,25,,37,22,15,0.594595,6.682881,247.266610
+gbpusd,test_with_best_fixed,fixed,40,25,,37,13,24,0.351351,-0.438426,-16.221764
+gbpusd,train_best_trailing,trail_after_tp,15,40,5,37,28,9,0.756757,9.420886,348.572781
+gbpusd,test_with_best_trailing,trail_after_tp,15,40,5,37,18,19,0.486486,3.400897,125.833191
+usdcad,train_best_fixed,fixed,40,35,,9,8,1,0.888889,19.603705,176.433341
+usdcad,test_with_best_fixed,fixed,40,35,,2,0,2,0.000000,-17.468596,-34.937193
+usdcad,train_best_trailing,trail_after_tp,40,35,5,9,8,1,0.888889,20.611182,185.500638
+usdcad,test_with_best_trailing,trail_after_tp,40,35,5,2,0,2,0.000000,-17.468596,-34.937193
+usdjpy,train_best_fixed,fixed,40,35,,6,5,1,0.833333,17.823615,106.941690
+usdjpy,test_with_best_fixed,fixed,40,35,,3,2,1,0.666667,13.882195,41.646585
+usdjpy,train_best_trailing,trail_after_tp,35,35,10,6,5,1,0.833333,38.579590,231.477542
+usdjpy,test_with_best_trailing,trail_after_tp,35,35,10,3,2,1,0.666667,20.483364,61.450092
