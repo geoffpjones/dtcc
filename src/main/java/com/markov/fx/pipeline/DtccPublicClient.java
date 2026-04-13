@@ -189,7 +189,15 @@ public class DtccPublicClient {
         String ostyle = row.getOrDefault("Option Style", "").trim();
         String pname = row.getOrDefault("Product name", "").toUpperCase();
         String upiFisn = row.getOrDefault("UPI FISN", "").toUpperCase();
-        return !embedded.isEmpty() || !otype.isEmpty() || !ostyle.isEmpty() || pname.contains("OPTION") || upiFisn.contains("OPTION");
+        // DTCC FX option rows are often only identifiable from the UPI family text rather than the
+        // mostly-blank metadata fields. Accept all NA/O* rows here and let downstream gamma logic
+        // apply the stricter vanilla/exotic inclusion rules.
+        return !embedded.isEmpty()
+                || !otype.isEmpty()
+                || !ostyle.isEmpty()
+                || pname.contains("OPTION")
+                || upiFisn.contains("OPTION")
+                || upiFisn.startsWith("NA/O");
     }
 
     private static String pairFromUpi(String upiFisn, Set<String> pairs) {

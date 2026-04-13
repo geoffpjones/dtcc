@@ -16,6 +16,7 @@ public record PipelineConfig(
         Path tickDir,
         String dbPath,
         List<String> pairs,
+        Path optionsInputCsv,
         Path signalSelectionPath,
         boolean reportOnly,
         int maxSignalStalenessDays,
@@ -34,6 +35,9 @@ public record PipelineConfig(
         Path tickDir = projectRoot.resolve(m.getOrDefault("tick-dir", "tick_data")).normalize();
         String dbPath = projectRoot.resolve(m.getOrDefault("db", "data/market-bars-5y.db")).normalize().toString();
         List<String> pairs = parsePairs(m.getOrDefault("pairs", "EURUSD,GBPUSD,AUDUSD,USDCAD,USDJPY"));
+        Path optionsInputCsv = m.containsKey("options-input-csv")
+                ? projectRoot.resolve(m.get("options-input-csv")).normalize()
+                : null;
         Path defaultSignalSelection = projectRoot.resolve("config/signal_selection.csv").normalize();
         Path signalSelectionPath = m.containsKey("signal-selection")
                 ? projectRoot.resolve(m.get("signal-selection")).normalize()
@@ -66,6 +70,7 @@ public record PipelineConfig(
                 tickDir,
                 dbPath,
                 List.copyOf(pairs),
+                optionsInputCsv,
                 signalSelectionPath,
                 reportOnly,
                 maxSignalStalenessDays,
@@ -82,7 +87,7 @@ public record PipelineConfig(
     private static Map<String, String> parseFlags(String[] args) {
         Set<String> allowed = Set.of(
                 "project-root", "data-dir", "tick-dir", "db",
-                "pairs",
+                "pairs", "options-input-csv",
                 "signal-selection", "report-only", "max-signal-staleness-days",
                 "report-date", "dtcc-bootstrap-start", "market-bootstrap-start",
                 "dtcc-regime", "dtcc-asset", "vol-assumption", "topn"

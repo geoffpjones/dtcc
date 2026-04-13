@@ -18,6 +18,7 @@ class PipelineConfigTest {
         PipelineConfig cfg = PipelineConfig.parse(new String[]{
                 "--project-root", "/tmp/project",
                 "--pairs", "EURUSD,USDJPY",
+                "--options-input-csv", "data/options_data_full.csv",
                 "--report-date", "2026-04-11",
                 "--topn", "7",
                 "--vol-assumption", "0.2",
@@ -28,6 +29,7 @@ class PipelineConfigTest {
 
         assertEquals("/tmp/project/data/market-bars-5y.db", cfg.dbPath());
         assertEquals(java.util.List.of("EURUSD", "USDJPY"), cfg.pairs());
+        assertEquals("/tmp/project/data/options_data_full.csv", cfg.optionsInputCsv().toString());
         assertEquals("/tmp/project/config/signal_selection.csv", cfg.signalSelectionPath().toString());
         assertEquals(true, cfg.reportOnly());
         assertEquals(6, cfg.maxSignalStalenessDays());

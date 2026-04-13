@@ -35,9 +35,7 @@ public class DailyRocPipelineMain {
             updateDukascopy(cfg, pairs, barRepository);
             exportHourlyBars(cfg, pairs);
 
-            Path optionsForGamma = cfg.dataDir().resolve("options_data_fx_pairs_for_gamma.csv");
-            optionRepo.exportOptionsCsv(optionsForGamma, pairs);
-            LOG.info(() -> "Exported options CSV for gamma: " + optionsForGamma);
+            Path optionsForGamma = resolveOptionsForGamma(cfg, optionRepo, pairs);
 
             recalcGamma(cfg, optionsForGamma);
         } else {
@@ -45,6 +43,21 @@ public class DailyRocPipelineMain {
         }
         Path reportCsv = produceLimitReports(cfg, pairs, optionRepo, signalSelection);
         LOG.info(() -> "Daily limit report written: " + reportCsv);
+    }
+
+    private static Path resolveOptionsForGamma(
+            PipelineConfig cfg,
+            DtccOptionTradeRepository optionRepo,
+            List<String> pairs
+    ) {
+        if (cfg.optionsInputCsv() != null) {
+            LOG.info(() -> "Using explicit options input CSV for gamma: " + cfg.optionsInputCsv());
+            return cfg.optionsInputCsv();
+        }
+        Path optionsForGamma = cfg.dataDir().resolve("options_data_fx_pairs_for_gamma.csv");
+        optionRepo.exportOptionsCsv(optionsForGamma, pairs);
+        LOG.info(() -> "Exported options CSV for gamma: " + optionsForGamma);
+        return optionsForGamma;
     }
 
     private static PairSignalSelection loadSignalSelection(PipelineConfig cfg) throws IOException {
