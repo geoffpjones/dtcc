@@ -5,9 +5,8 @@ Daily pipeline for the configured FX pair universe, currently
 - ingests DTCC public FX options data,
 - ingests Dukascopy 1-minute bars,
 - recalculates gamma proxy files,
-- generates daily buy/sell limit report rows for both:
-  - default gamma-weighted signal
-  - alternate `gamma_nearest_top1_md50_dec1` signal
+- generates the selected daily buy/sell limit report csv,
+- generates a one-page PDF daily report.
 
 ## Stack
 - Java 17+
@@ -25,6 +24,13 @@ To generate report rows only from existing hourly/gamma files:
 ```bash
 ./scripts/run_daily_roc_pipeline.sh --report-date 2026-04-13 --report-only true
 ```
+
+The wrapper writes both:
+- `data/reports/fx_limit_order_report_<YYYY-MM-DD>.csv`
+- `data/reports/fx_daily_report_<YYYY-MM-DD>.pdf`
+
+Month-to-date performance in the PDF is sourced from the latest `data/reopt_*` directory.
+Override that with `ROC_REOPT_DIR=/abs/path/to/reopt_dir`.
 
 To repair `dtcc_option_trades` from a local DTCC CSV extract:
 
@@ -49,15 +55,12 @@ Default `--report-date` is yesterday UTC.
   - `data/gbpusd_gamma_proxy_by_strike_call_put.csv`
 - Daily report:
   - `data/reports/fx_limit_order_report_<YYYY-MM-DD>.csv`
-  - columns include both default and alternate levels:
-    - `default_buy_limit`
-    - `default_sell_limit`
-    - `alt_buy_limit`
-    - `alt_sell_limit`
-    - plus pair-selected production fields:
-      - `selected_signal`
-      - `selected_buy_limit`
-      - `selected_sell_limit`
+  - `data/reports/fx_daily_report_<YYYY-MM-DD>.pdf`
+  - csv columns include selected production fields:
+    - `selected_signal`
+    - `selected_buy_limit`
+    - `selected_sell_limit`
+    - optimized exit settings and derived TP/SL levels
 
 ## SQLite Bootstrap Behavior
 No DB file or tables need to exist in git.
@@ -90,7 +93,7 @@ Created tables:
 - DTCC ingest is incremental by file (`dtcc_ingested_files`).
 - Dukascopy ingest is incremental by latest stored bar date per pair.
 - Daily runtime is pure Java: DTCC ingest, hourly export, gamma recomputation and limit generation do not shell out to Python.
-- The report persists the default signal into legacy `buy_limit` / `sell_limit` / `notes` columns and also stores alternate signal columns `alt_buy_limit` / `alt_sell_limit` / `alt_notes`.
+- The report persists the selected production signal and its optimized exit parameters.
 - Pair selection is driven by checked-in config when available.
 - Pair universe is configurable with `--pairs`; the default run covers the five pairs in the checked-in signal-selection file.
 - By default the pipeline loads [config/signal_selection.csv](/home/geoffpjones/projects/dtcc/config/signal_selection.csv) if it exists.
