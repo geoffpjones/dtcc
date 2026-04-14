@@ -198,11 +198,14 @@ public class DailyRocPipelineMain {
                 LimitSignalCalculator.LimitRow selectedRow =
                         selectedSpec.name().equals(LimitSignalCalculator.ALT_SIGNAL.name()) ? altRow : defaultRow;
                 String selectedSignalName = stale ? "" : selectedSpec.name();
-                String selectedBuy = stale ? "" : fmt(selectedRow.buyLimit());
-                String selectedSell = stale ? "" : fmt(selectedRow.sellLimit());
+                SelectedLevels selectedLevels = stale
+                        ? new SelectedLevels(null, null, null)
+                        : chooseSelectedLevels(defaultRow, altRow, selectedSpec);
+                String selectedBuy = stale ? "" : fmtNullable(selectedLevels.buyLevel());
+                String selectedSell = stale ? "" : fmtNullable(selectedLevels.sellLevel());
                 String selectedNotes = stale
                         ? "stale_signal|effective_signal_date=" + signalDate + "|staleness_days=" + stalenessDays
-                        : selectedRow.notes();
+                        : mergeSelectedNotes(selectedRow.notes(), selectedLevels.notesSuffix());
                 // Report contract: one row per pair per report date.
                 w.write(String.join(",",
                         CsvUtils.escape(cfg.reportDate().toString()),
@@ -229,7 +232,22 @@ public class DailyRocPipelineMain {
                         defaultRow,
                         altRow,
                         stale ? null : selectedSpec,
-                        stale ? null : selectedRow,
+                        stale ? null : new LimitSignalCalculator.LimitRow(
+                                selectedRow.date(),
+                                selectedRow.refPricePrevClose(),
+                                selectedLevels.buyLevel() == null ? Double.NaN : selectedLevels.buyLevel(),
+                                selectedLevels.sellLevel() == null ? Double.NaN : selectedLevels.sellLevel(),
+                                selectedRow.eodClose(),
+                                selectedRow.buyFilled(),
+                                selectedRow.sellFilled(),
+                                selectedRow.buyFillTimeUtc(),
+                                selectedRow.sellFillTimeUtc(),
+                                selectedRow.buyPnlPips(),
+                                selectedRow.sellPnlPips(),
+                                selectedRow.netPnlPips(),
+                                selectedRow.cumNetPnlPips(),
+                                selectedNotes
+                        ),
                         selectedNotes
                 );
             }
@@ -242,5 +260,97 @@ public class DailyRocPipelineMain {
             return "";
         }
         return Double.toString(value);
+    }
+
+    private static String fmtNullable(Double value) {
+        if (value == null) {
+            return "";
+        }
+        return fmt(value);
+    }
+
+    static SelectedLevels chooseSelectedLevels(
+            LimitSignalCalculator.LimitRow defaultRow,
+            LimitSignalCalculator.LimitRow altRow,
+            LimitSignalCalculator.SignalSpec selectedSpec
+    ) {
+        LimitSignalCalculator.LimitRow preferred =
+                selectedSpec.name().equals(LimitSignalCalculator.ALT_SIGNAL.name()) ? altRow : defaultRow;
+        boolean preferredBuyValid = validBuy(preferred.buyLimit(), preferred.refPricePrevClose());
+        boolean preferredSellValid = validSell(preferred.sellLimit(), preferred.refPricePrevClose());
+        boolean defaultBuyValid = validBuy(defaultRow.buyLimit(), defaultRow.refPricePrevClose());
+        boolean defaultSellValid = validSell(defaultRow.sellLimit(), defaultRow.refPricePrevClose());
+
+        double preferredMarketBuyAnchor = marketBuyAnchor(preferred);
+        double preferredMarketSellAnchor = marketSellAnchor(preferred);
+        double defaultMarketBuyAnchor = marketBuyAnchor(defaultRow);
+        double defaultMarketSellAnchor = marketSellAnchor(defaultRow);
+
+        preferredBuyValid = preferredBuyValid && validBuy(preferred.buyLimit(), preferredMarketBuyAnchor);
+        preferredSellValid = preferredSellValid && validSell(preferred.sellLimit(), preferredMarketSellAnchor);
+        defaultBuyValid = defaultBuyValid && validBuy(defaultRow.buyLimit(), defaultMarketBuyAnchor);
+        defaultSellValid = defaultSellValid && validSell(defaultRow.sellLimit(), defaultMarketSellAnchor);
+
+        Double buy;
+        if (preferredBuyValid) {
+            buy = preferred.buyLimit();
+        } else if (defaultBuyValid) {
+            buy = defaultRow.buyLimit();
+        } else {
+            buy = null;
+        }
+
+        Double sell;
+        if (preferredSellValid) {
+            sell = preferred.sellLimit();
+        } else if (defaultSellValid) {
+            sell = defaultRow.sellLimit();
+        } else {
+            sell = null;
+        }
+
+        List<String> tags = new java.util.ArrayList<>();
+        if (!preferredBuyValid && defaultBuyValid) {
+            tags.add("fallback_default_buy");
+        }
+        if (!preferredSellValid && defaultSellValid) {
+            tags.add("fallback_default_sell");
+        }
+        if (!preferredBuyValid && buy == null && !Double.isNaN(preferred.buyLimit())) {
+            tags.add("invalid_buy_suppressed");
+        }
+        if (!preferredSellValid && sell == null && !Double.isNaN(preferred.sellLimit())) {
+            tags.add("invalid_sell_suppressed");
+        }
+        return new SelectedLevels(buy, sell, tags.isEmpty() ? null : String.join("|", tags));
+    }
+
+    private static boolean validBuy(double buy, double ref) {
+        return !Double.isNaN(buy) && !Double.isNaN(ref) && buy <= ref;
+    }
+
+    private static boolean validSell(double sell, double ref) {
+        return !Double.isNaN(sell) && !Double.isNaN(ref) && sell >= ref;
+    }
+
+    private static double marketBuyAnchor(LimitSignalCalculator.LimitRow row) {
+        return Double.isNaN(row.eodClose()) ? row.refPricePrevClose() : Math.min(row.refPricePrevClose(), row.eodClose());
+    }
+
+    private static double marketSellAnchor(LimitSignalCalculator.LimitRow row) {
+        return Double.isNaN(row.eodClose()) ? row.refPricePrevClose() : Math.max(row.refPricePrevClose(), row.eodClose());
+    }
+
+    private static String mergeSelectedNotes(String base, String suffix) {
+        if (suffix == null || suffix.isBlank()) {
+            return base;
+        }
+        if (base == null || base.isBlank()) {
+            return suffix;
+        }
+        return base + "|" + suffix;
+    }
+
+    record SelectedLevels(Double buyLevel, Double sellLevel, String notesSuffix) {
     }
 }
