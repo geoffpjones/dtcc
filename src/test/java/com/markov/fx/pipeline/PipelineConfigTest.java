@@ -24,6 +24,7 @@ class PipelineConfigTest {
                 "--vol-assumption", "0.2",
                 "--report-only", "true",
                 "--signal-selection", "config/signal_selection.csv",
+                "--exit-params", "config/exit_params.csv",
                 "--max-signal-staleness-days", "6"
         });
 
@@ -31,6 +32,7 @@ class PipelineConfigTest {
         assertEquals(java.util.List.of("EURUSD", "USDJPY"), cfg.pairs());
         assertEquals("/tmp/project/data/options_data_full.csv", cfg.optionsInputCsv().toString());
         assertEquals("/tmp/project/config/signal_selection.csv", cfg.signalSelectionPath().toString());
+        assertEquals("/tmp/project/config/exit_params.csv", cfg.exitParamPath().toString());
         assertEquals(true, cfg.reportOnly());
         assertEquals(6, cfg.maxSignalStalenessDays());
         assertEquals(7, cfg.topn());
@@ -64,6 +66,7 @@ class PipelineConfigTest {
         Path projectRoot = tempDir.resolve("project");
         Files.createDirectories(projectRoot.resolve("config"));
         Files.writeString(projectRoot.resolve("config/signal_selection.csv"), "pair,selected_signal\nEURUSD,default_gamma_weighted\n");
+        Files.writeString(projectRoot.resolve("config/exit_params.csv"), "pair,mode,tp_pips,sl_pips,trail_pips\nEURUSD,trail_after_tp,20,30,5\n");
 
         PipelineConfig cfg = PipelineConfig.parse(new String[]{
                 "--project-root", projectRoot.toString()
@@ -71,6 +74,7 @@ class PipelineConfigTest {
 
         assertEquals(java.util.List.of("EURUSD", "GBPUSD", "AUDUSD", "USDCAD", "USDJPY"), cfg.pairs());
         assertEquals(projectRoot.resolve("config/signal_selection.csv").toString(), cfg.signalSelectionPath().toString());
+        assertEquals(projectRoot.resolve("config/exit_params.csv").toString(), cfg.exitParamPath().toString());
     }
 
 }

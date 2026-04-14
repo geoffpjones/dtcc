@@ -91,6 +91,14 @@ public class DtccOptionTradeRepository {
                     selected_buy_limit REAL,
                     selected_sell_limit REAL,
                     selected_notes TEXT,
+                    selected_exit_mode TEXT,
+                    selected_tp_pips REAL,
+                    selected_sl_pips REAL,
+                    selected_trail_pips REAL,
+                    selected_buy_tp_level REAL,
+                    selected_buy_sl_level REAL,
+                    selected_sell_tp_level REAL,
+                    selected_sell_sl_level REAL,
                     generated_at_utc TEXT NOT NULL,
                     PRIMARY KEY (trade_date, pair)
                 )
@@ -110,6 +118,14 @@ public class DtccOptionTradeRepository {
             ensureColumn(st, "gamma_limit_reports", "selected_buy_limit", "REAL");
             ensureColumn(st, "gamma_limit_reports", "selected_sell_limit", "REAL");
             ensureColumn(st, "gamma_limit_reports", "selected_notes", "TEXT");
+            ensureColumn(st, "gamma_limit_reports", "selected_exit_mode", "TEXT");
+            ensureColumn(st, "gamma_limit_reports", "selected_tp_pips", "REAL");
+            ensureColumn(st, "gamma_limit_reports", "selected_sl_pips", "REAL");
+            ensureColumn(st, "gamma_limit_reports", "selected_trail_pips", "REAL");
+            ensureColumn(st, "gamma_limit_reports", "selected_buy_tp_level", "REAL");
+            ensureColumn(st, "gamma_limit_reports", "selected_buy_sl_level", "REAL");
+            ensureColumn(st, "gamma_limit_reports", "selected_sell_tp_level", "REAL");
+            ensureColumn(st, "gamma_limit_reports", "selected_sell_sl_level", "REAL");
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize DTCC SQLite schema", e);
         }
@@ -300,15 +316,19 @@ public class DtccOptionTradeRepository {
             LimitSignalCalculator.LimitRow altRow,
             LimitSignalCalculator.SignalSpec selectedSignal,
             LimitSignalCalculator.LimitRow selectedRow,
-            String selectedNotes
+            String selectedNotes,
+            ExitParamSelection.ExitParams exitParams,
+            DailyRocPipelineMain.TradeLevels tradeLevels
     ) {
         String sql = """
                 INSERT INTO gamma_limit_reports(
                     trade_date, effective_signal_date, pair, ref_price_prev_close, buy_limit, sell_limit, eod_close, notes,
                     alt_buy_limit, alt_sell_limit, alt_notes,
                     selected_signal, selected_buy_limit, selected_sell_limit, selected_notes,
+                    selected_exit_mode, selected_tp_pips, selected_sl_pips, selected_trail_pips,
+                    selected_buy_tp_level, selected_buy_sl_level, selected_sell_tp_level, selected_sell_sl_level,
                     generated_at_utc
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(trade_date, pair) DO UPDATE SET
                     effective_signal_date=excluded.effective_signal_date,
                     ref_price_prev_close=excluded.ref_price_prev_close,
@@ -323,6 +343,14 @@ public class DtccOptionTradeRepository {
                     selected_buy_limit=excluded.selected_buy_limit,
                     selected_sell_limit=excluded.selected_sell_limit,
                     selected_notes=excluded.selected_notes,
+                    selected_exit_mode=excluded.selected_exit_mode,
+                    selected_tp_pips=excluded.selected_tp_pips,
+                    selected_sl_pips=excluded.selected_sl_pips,
+                    selected_trail_pips=excluded.selected_trail_pips,
+                    selected_buy_tp_level=excluded.selected_buy_tp_level,
+                    selected_buy_sl_level=excluded.selected_buy_sl_level,
+                    selected_sell_tp_level=excluded.selected_sell_tp_level,
+                    selected_sell_sl_level=excluded.selected_sell_sl_level,
                     generated_at_utc=excluded.generated_at_utc
                 """;
         try (Connection c = DriverManager.getConnection(dbUrl);
@@ -342,7 +370,15 @@ public class DtccOptionTradeRepository {
             setNullableDouble(ps, 13, selectedRow == null ? null : selectedRow.buyLimit());
             setNullableDouble(ps, 14, selectedRow == null ? null : selectedRow.sellLimit());
             ps.setString(15, selectedNotes);
-            ps.setString(16, Instant.now().toString());
+            ps.setString(16, exitParams == null ? null : exitParams.mode());
+            setNullableDouble(ps, 17, exitParams == null ? null : exitParams.tpPips());
+            setNullableDouble(ps, 18, exitParams == null ? null : exitParams.slPips());
+            setNullableDouble(ps, 19, exitParams == null ? null : exitParams.trailPips());
+            setNullableDouble(ps, 20, tradeLevels == null ? null : tradeLevels.buyTp());
+            setNullableDouble(ps, 21, tradeLevels == null ? null : tradeLevels.buySl());
+            setNullableDouble(ps, 22, tradeLevels == null ? null : tradeLevels.sellTp());
+            setNullableDouble(ps, 23, tradeLevels == null ? null : tradeLevels.sellSl());
+            ps.setString(24, Instant.now().toString());
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to save gamma_limit_reports row for " + pair + " " + tradeDate, e);

@@ -52,4 +52,18 @@ class DailyRocPipelineMainTest {
         assertEquals(1.1756593028, selected.sellLevel());
         assertEquals("fallback_default_sell", selected.notesSuffix());
     }
+
+    @Test
+    void tradeLevels_usesConfiguredPipDistances() {
+        DailyRocPipelineMain.TradeLevels levels = DailyRocPipelineMain.tradeLevels(
+                new DailyRocPipelineMain.SelectedLevels(1.1000, 1.2000, null),
+                new ExitParamSelection.ExitParams("trail_after_tp", 20.0, 30.0, 5.0),
+                0.0001
+        );
+
+        assertEquals(1.1020, levels.buyTp(), 1e-9);
+        assertEquals(1.0970, levels.buySl(), 1e-9);
+        assertEquals(1.1980, levels.sellTp(), 1e-9);
+        assertEquals(1.2030, levels.sellSl(), 1e-9);
+    }
 }

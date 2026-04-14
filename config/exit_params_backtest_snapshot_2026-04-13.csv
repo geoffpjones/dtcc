@@ -1,0 +1,6 @@
+pair,selected_mode,tp_pips,sl_pips,trail_pips,test_total_pnl_pips,test_entries,train_total_pnl_pips,train_entries,basis
+EURUSD,trail_after_tp,20,30,5,496.600000,221,862.700000,223,reopt_2026-04-13
+GBPUSD,trail_after_tp,35,40,5,514.500000,218,1006.300000,236,reopt_2026-04-13
+AUDUSD,trail_after_tp,20,40,5,148.082742,49,308.023341,67,reopt_2026-04-13
+USDCAD,trail_after_tp,40,25,5,541.000000,219,1047.600000,227,reopt_2026-04-13
+USDJPY,trail_after_tp,20,15,5,754.600000,205,885.900000,225,reopt_2026-04-13

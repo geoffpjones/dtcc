@@ -18,6 +18,7 @@ public record PipelineConfig(
         List<String> pairs,
         Path optionsInputCsv,
         Path signalSelectionPath,
+        Path exitParamPath,
         boolean reportOnly,
         int maxSignalStalenessDays,
         LocalDate reportDate,
@@ -39,9 +40,13 @@ public record PipelineConfig(
                 ? projectRoot.resolve(m.get("options-input-csv")).normalize()
                 : null;
         Path defaultSignalSelection = projectRoot.resolve("config/signal_selection.csv").normalize();
+        Path defaultExitParams = projectRoot.resolve("config/exit_params.csv").normalize();
         Path signalSelectionPath = m.containsKey("signal-selection")
                 ? projectRoot.resolve(m.get("signal-selection")).normalize()
                 : (Files.exists(defaultSignalSelection) ? defaultSignalSelection : null);
+        Path exitParamPath = m.containsKey("exit-params")
+                ? projectRoot.resolve(m.get("exit-params")).normalize()
+                : (Files.exists(defaultExitParams) ? defaultExitParams : null);
         boolean reportOnly = Boolean.parseBoolean(m.getOrDefault("report-only", "false"));
         int maxSignalStalenessDays = Integer.parseInt(m.getOrDefault("max-signal-staleness-days", "5"));
         LocalDate reportDate = LocalDate.parse(m.getOrDefault(
@@ -72,6 +77,7 @@ public record PipelineConfig(
                 List.copyOf(pairs),
                 optionsInputCsv,
                 signalSelectionPath,
+                exitParamPath,
                 reportOnly,
                 maxSignalStalenessDays,
                 reportDate,
@@ -88,7 +94,7 @@ public record PipelineConfig(
         Set<String> allowed = Set.of(
                 "project-root", "data-dir", "tick-dir", "db",
                 "pairs", "options-input-csv",
-                "signal-selection", "report-only", "max-signal-staleness-days",
+                "signal-selection", "exit-params", "report-only", "max-signal-staleness-days",
                 "report-date", "dtcc-bootstrap-start", "market-bootstrap-start",
                 "dtcc-regime", "dtcc-asset", "vol-assumption", "topn"
         );

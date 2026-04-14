@@ -27,6 +27,7 @@ public class DailyRocPipelineMain {
         SqliteBarRepository barRepository = new SqliteBarRepository(cfg.dbPath());
         DtccOptionTradeRepository optionRepo = new DtccOptionTradeRepository(cfg.dbPath());
         PairSignalSelection signalSelection = loadSignalSelection(cfg);
+        ExitParamSelection exitParamSelection = loadExitParams(cfg);
 
         LOG.info(() -> "Pipeline start reportDate=" + cfg.reportDate() + " db=" + cfg.dbPath());
 
@@ -41,7 +42,7 @@ public class DailyRocPipelineMain {
         } else {
             LOG.info("Report-only mode enabled: skipping DTCC ingest, Dukascopy ingest, hourly export and gamma recomputation");
         }
-        Path reportCsv = produceLimitReports(cfg, pairs, optionRepo, signalSelection);
+        Path reportCsv = produceLimitReports(cfg, pairs, optionRepo, signalSelection, exitParamSelection);
         LOG.info(() -> "Daily limit report written: " + reportCsv);
     }
 
@@ -67,6 +68,15 @@ public class DailyRocPipelineMain {
         }
         PairSignalSelection selection = PairSignalSelection.load(cfg.signalSelectionPath());
         LOG.info(() -> "Loaded signal selection config from " + cfg.signalSelectionPath());
+        return selection;
+    }
+
+    private static ExitParamSelection loadExitParams(PipelineConfig cfg) throws IOException {
+        if (cfg.exitParamPath() == null) {
+            throw new IllegalArgumentException("No exit-params config supplied and config/exit_params.csv not found");
+        }
+        ExitParamSelection selection = ExitParamSelection.load(cfg.exitParamPath());
+        LOG.info(() -> "Loaded exit param config from " + cfg.exitParamPath());
         return selection;
     }
 
@@ -114,7 +124,8 @@ public class DailyRocPipelineMain {
             PipelineConfig cfg,
             List<String> pairs,
             DtccOptionTradeRepository optionRepo,
-            PairSignalSelection signalSelection
+            PairSignalSelection signalSelection,
+            ExitParamSelection exitParamSelection
     ) throws Exception {
         Path reportDir = cfg.dataDir().resolve("reports");
         Files.createDirectories(reportDir);
@@ -123,9 +134,9 @@ public class DailyRocPipelineMain {
 
         try (BufferedWriter w = Files.newBufferedWriter(reportCsv)) {
             w.write("requested_trade_date,effective_signal_date,pair,ref_price_prev_close,eod_close,"
-                    + "default_buy_limit,default_sell_limit,default_notes,"
-                    + "alt_buy_limit,alt_sell_limit,alt_notes,"
-                    + "selected_signal,selected_buy_limit,selected_sell_limit,selected_notes");
+                    + "selected_signal,selected_buy_limit,selected_sell_limit,selected_notes,"
+                    + "selected_exit_mode,selected_tp_pips,selected_sl_pips,selected_trail_pips,"
+                    + "selected_buy_tp_level,selected_buy_sl_level,selected_sell_tp_level,selected_sell_sl_level");
             w.newLine();
             for (String pair : pairs) {
                 Path defaultOut = reportDir.resolve(pair.toLowerCase() + "_walkforward_limit_default_" + cfg.reportDate() + ".csv");
@@ -195,6 +206,7 @@ public class DailyRocPipelineMain {
                 long stalenessDays = ChronoUnit.DAYS.between(signalDate, cfg.reportDate());
                 boolean stale = stalenessDays > cfg.maxSignalStalenessDays();
                 LimitSignalCalculator.SignalSpec selectedSpec = signalSelection.selectedFor(pair);
+                ExitParamSelection.ExitParams exitParams = exitParamSelection.selectedFor(pair);
                 LimitSignalCalculator.LimitRow selectedRow =
                         selectedSpec.name().equals(LimitSignalCalculator.ALT_SIGNAL.name()) ? altRow : defaultRow;
                 String selectedSignalName = stale ? "" : selectedSpec.name();
@@ -206,6 +218,9 @@ public class DailyRocPipelineMain {
                 String selectedNotes = stale
                         ? "stale_signal|effective_signal_date=" + signalDate + "|staleness_days=" + stalenessDays
                         : mergeSelectedNotes(selectedRow.notes(), selectedLevels.notesSuffix());
+                double pipSize = pipSize(pair);
+                TradeLevels tradeLevels = stale ? new TradeLevels(null, null, null, null)
+                        : tradeLevels(selectedLevels, exitParams, pipSize);
                 // Report contract: one row per pair per report date.
                 w.write(String.join(",",
                         CsvUtils.escape(cfg.reportDate().toString()),
@@ -213,16 +228,18 @@ public class DailyRocPipelineMain {
                         CsvUtils.escape(pair),
                         CsvUtils.escape(fmt(defaultRow.refPricePrevClose())),
                         CsvUtils.escape(fmt(defaultRow.eodClose())),
-                        CsvUtils.escape(fmt(defaultRow.buyLimit())),
-                        CsvUtils.escape(fmt(defaultRow.sellLimit())),
-                        CsvUtils.escape(defaultRow.notes()),
-                        CsvUtils.escape(fmt(altRow.buyLimit())),
-                        CsvUtils.escape(fmt(altRow.sellLimit())),
-                        CsvUtils.escape(altRow.notes()),
                         CsvUtils.escape(selectedSignalName),
                         CsvUtils.escape(selectedBuy),
                         CsvUtils.escape(selectedSell),
-                        CsvUtils.escape(selectedNotes)));
+                        CsvUtils.escape(selectedNotes),
+                        CsvUtils.escape(stale ? "" : exitParams.mode()),
+                        CsvUtils.escape(stale ? "" : Double.toString(exitParams.tpPips())),
+                        CsvUtils.escape(stale ? "" : Double.toString(exitParams.slPips())),
+                        CsvUtils.escape(stale ? "" : Double.toString(exitParams.trailPips())),
+                        CsvUtils.escape(fmtNullable(tradeLevels.buyTp())),
+                        CsvUtils.escape(fmtNullable(tradeLevels.buySl())),
+                        CsvUtils.escape(fmtNullable(tradeLevels.sellTp())),
+                        CsvUtils.escape(fmtNullable(tradeLevels.sellSl()))));
                 w.newLine();
 
                 optionRepo.upsertLimitReportRow(
@@ -248,7 +265,9 @@ public class DailyRocPipelineMain {
                                 selectedRow.cumNetPnlPips(),
                                 selectedNotes
                         ),
-                        selectedNotes
+                        selectedNotes,
+                        stale ? null : exitParams,
+                        tradeLevels
                 );
             }
         }
@@ -352,5 +371,20 @@ public class DailyRocPipelineMain {
     }
 
     record SelectedLevels(Double buyLevel, Double sellLevel, String notesSuffix) {
+    }
+
+    static TradeLevels tradeLevels(SelectedLevels selectedLevels, ExitParamSelection.ExitParams exitParams, double pipSize) {
+        Double buyTp = selectedLevels.buyLevel() == null ? null : selectedLevels.buyLevel() + exitParams.tpPips() * pipSize;
+        Double buySl = selectedLevels.buyLevel() == null ? null : selectedLevels.buyLevel() - exitParams.slPips() * pipSize;
+        Double sellTp = selectedLevels.sellLevel() == null ? null : selectedLevels.sellLevel() - exitParams.tpPips() * pipSize;
+        Double sellSl = selectedLevels.sellLevel() == null ? null : selectedLevels.sellLevel() + exitParams.slPips() * pipSize;
+        return new TradeLevels(buyTp, buySl, sellTp, sellSl);
+    }
+
+    private static double pipSize(String pair) {
+        return pair.endsWith("JPY") ? 0.01 : 0.0001;
+    }
+
+    record TradeLevels(Double buyTp, Double buySl, Double sellTp, Double sellSl) {
     }
 }
