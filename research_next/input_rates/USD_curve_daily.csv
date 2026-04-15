@@ -1,0 +1,6 @@
+currency,date,tenor_days,rate,source
+USD,2025-04-11,7,0.0435,template
+USD,2025-04-11,30,0.0438,template
+USD,2025-04-11,90,0.0442,template
+USD,2025-04-11,180,0.0445,template
+USD,2025-04-11,365,0.0449,template
